@@ -6,6 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![GitHub](https://img.shields.io/badge/GitHub-nbsgr/qwen--coderun--agent-blue?logo=github)](https://github.com/nbsgr/qwen-coderun-agent)
 
 **CodeRun AI Agent** is a VS Code extension that uses **Qwen 3.7 through the browser API** (`chat.qwen.ai`) as an autonomous coding agent. It operates via a Think → Plan → Act → Verify loop, reading/writing/editing files, running terminal commands, and searching code — all by embedding tool calls as text JSON blocks in the conversation.
 
@@ -136,6 +137,13 @@ This creates a `.vsix` file that can be installed via:
 ```
 code --install-extension ai-agent-<version>.vsix
 ```
+
+## 📦 Repository
+
+Find the source code on GitHub:
+- **Repo:** [github.com/nbsgr/qwen-coderun-agent](https://github.com/nbsgr/qwen-coderun-agent)
+- **Issues:** [github.com/nbsgr/qwen-coderun-agent/issues](https://github.com/nbsgr/qwen-coderun-agent/issues)
+- **Clone:** `git clone https://github.com/nbsgr/qwen-coderun-agent.git`
 
 ## License
 
