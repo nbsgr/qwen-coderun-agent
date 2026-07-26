@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-07-26T01:22:08.061Z",
+  "hasExtensionContext": true,
+  "cookieLength": 307,
+  "cookieStart": "token=eyJhbGciOiJIUzI1NiIsInR5",
+  "globalStateKeys": [
+    "qwen-coderun_selected_model",
+    "qwen-coderun_selected_provider",
+    "qwen-coderun_provider_configs",
+    "qwen-coderun_conversations",
+    "qwen-coderun.fallbackCookie"
+  ]
+}
+[MSG] 2026-07-26T01:22:09.381Z - saveSelectedModel
+
+[MSG] 2026-07-26T01:22:11.502Z - getQwenChatDetail
