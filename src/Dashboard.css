@@ -677,3 +677,9 @@ textarea {
   background: rgba(248, 81, 73, 0.2);
   color: #f85149;
 }
+
+@keyframes crSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+

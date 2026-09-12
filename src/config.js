@@ -78,6 +78,12 @@ export async function setApiKey(context, key) {
     await context.secrets.store('qwen-coderun.apiKey', key);
   } catch (_) {}
   await context.globalState.update('qwen-coderun.fallbackCookie', key);
+  try {
+    var all = getAllProviderConfigs(context);
+    all['qwen'] = all['qwen'] || {};
+    all['qwen'].apiKey = key;
+    await context.globalState.update(STORAGE_KEYS.PROVIDER_CONFIGS, JSON.stringify(all));
+  } catch (_) {}
 }
 
 export async function deleteApiKey(context) {
@@ -207,11 +213,17 @@ export async function getProviderConfigByName(context, providerName) {
   var saved = getSavedProviderConfig(context, providerName) || {};
   var isCompatible = providerName.startsWith('compatible');
   var defaults = isCompatible ? PROVIDER_DEFAULTS.compatible : (PROVIDER_DEFAULTS[providerName] || PROVIDER_DEFAULTS.ollama);
+  var key = '';
+  if (providerName === 'qwen' || !providerName) {
+    key = await getApiKey(context) || saved.apiKey || '';
+  } else {
+    key = saved.apiKey || '';
+  }
   return {
     provider: providerName,
     baseUrl: saved.baseUrl || defaults.baseUrl,
     model: saved.model || '',
-    apiKey: saved.apiKey || '',
+    apiKey: key,
     needsKey: defaults.needsKey,
     apiType: saved.apiType || 'openai'
   };

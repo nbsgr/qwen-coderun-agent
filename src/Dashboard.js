@@ -455,31 +455,41 @@
                 '<p style="margin: 0; font-size: 0.9rem; text-align: center; color: var(--text-secondary); line-height: 1.5;">' +
                   'Connect your Qwen account to use the AI agent. Login once and your session is saved permanently.' +
                 '</p>' +
-                '<div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">' +
-                  '<div style="background: var(--bg-secondary); border-radius: 8px; padding: 14px; text-align: left;">' +
-                    '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">' +
-                      '<span style="background: #6366f1; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; flex-shrink: 0;">1</span>' +
-                      '<strong style="color: var(--text-primary); font-size: 0.9rem;">Open Qwen in your browser & log in</strong>' +
-                    '</div>' +
-                    '<button id="qwenOpenLoginBtn" class="cr-save-btn" style="width: 100%; padding: 10px; font-weight: bold; background: #6366f1; color: #fff; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.9rem;">' +
-                      'Open chat.qwen.ai →' +
-                    '</button>' +
-                  '</div>' +
-                  '<div style="background: var(--bg-secondary); border-radius: 8px; padding: 14px; text-align: left;">' +
-                    '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">' +
-                      '<span style="background: #6366f1; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; flex-shrink: 0;">2</span>' +
-                      '<strong style="color: var(--text-primary); font-size: 0.9rem;">Paste Qwen Token</strong>' +
-                    '</div>' +
-                    '<p style="margin: 0 0 8px 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">' +
-                      'Qwen\'s session token is secure and cannot be read by console scripts. To copy it:<br>' +
-                      '1. Press <strong>F12</strong> (DevTools) → <strong>Application</strong> tab → expand <strong>Cookies</strong> on the left → click <strong>chat.qwen.ai</strong>.<br>' +
-                      '2. Find the row named <strong>token</strong>, double-click its <strong>Value</strong> column, copy it (starts with <code style="background: rgba(99,102,241,0.15); padding: 1px 3px; border-radius: 2px;">eyJ</code>), and paste it below.' +
+                '<div style="width: 100%; display: flex; flex-direction: column; gap: 14px;">' +
+                  '<div style="background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%); border: 1px solid rgba(99,102,241,0.25); border-radius: 10px; padding: 16px; text-align: center;">' +
+                    '<div style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Automatic 1-Click Login</div>' +
+                    '<p style="margin: 0 0 12px 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4;">' +
+                      'Opens a secure browser window to log in. Your session token will be captured and saved automatically.' +
                     '</p>' +
-                    '<textarea id="qwenLoginCookie" rows="3" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text-primary); font-family: monospace; font-size: 0.8rem; resize: none; box-sizing: border-box;" placeholder="Paste the token value here (starts with eyJ...)"></textarea>' +
-                    '<button id="qwenManualConnectBtn" class="cr-save-btn" style="width: 100%; padding: 10px; margin-top: 8px; font-weight: bold; background: #10b981; color: #fff; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.9rem;">' +
-                      'Connect & Save Session' +
+                    '<button id="qwenAutoLoginBtn" class="cr-save-btn" style="width: 100%; padding: 11px; font-weight: 600; background: #6366f1; color: #fff; border: none; border-radius: 7px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.95rem; box-shadow: 0 4px 14px rgba(99,102,241,0.35);">' +
+                      '🚀 Sign In with Qwen (1-Click)' +
                     '</button>' +
+                    '<div id="qwenAutoLoginWaiting" style="display: none; padding: 10px 0; flex-direction: column; gap: 10px; align-items: center;">' +
+                      '<div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #6366f1; font-weight: 500;">' +
+                        '<span class="cr-loading-spinner" style="display: inline-block; width: 14px; height: 14px; border: 2px solid #6366f1; border-top-color: transparent; border-radius: 50%; animation: crSpin 0.8s linear infinite;"></span>' +
+                        '<span id="qwenAutoLoginWaitingText">Opening browser window...</span>' +
+                      '</div>' +
+                      '<button id="qwenCancelAutoLoginBtn" style="padding: 5px 12px; font-size: 0.8rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 5px; cursor: pointer;">Cancel</button>' +
+                    '</div>' +
                   '</div>' +
+                  '<details style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: left;">' +
+                    '<summary style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); cursor: pointer; user-select: none;">' +
+                      'Manual Token Entry (Fallback)' +
+                    '</summary>' +
+                    '<div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">' +
+                      '<p style="margin: 0; font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;">' +
+                        '1. Click below to open Qwen in browser and log in.<br>' +
+                        '2. Press F12 → Application → Cookies → chat.qwen.ai → copy the "token" value.' +
+                      '</p>' +
+                      '<button id="qwenOpenLoginBtn" class="cr-save-btn" style="width: 100%; padding: 8px; font-size: 0.82rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">' +
+                        'Open chat.qwen.ai in Browser ↗' +
+                      '</button>' +
+                      '<textarea id="qwenLoginCookie" rows="2" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: var(--text-primary); font-family: monospace; font-size: 0.78rem; resize: none; box-sizing: border-box;" placeholder="Paste token value (starts with eyJ...)"></textarea>' +
+                      '<button id="qwenManualConnectBtn" class="cr-save-btn" style="width: 100%; padding: 8px; font-weight: 600; background: #10b981; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">' +
+                        'Connect & Save Session' +
+                      '</button>' +
+                    '</div>' +
+                  '</details>' +
                 '</div>' +
                 '<div id="qwenLoginError" style="color: #ef4444; font-size: 0.85rem; text-align: center; min-height: 20px; font-weight: 500;"></div>' +
               '</div>' +
@@ -540,6 +550,37 @@
     document.getElementById("newChatHeaderBtn").onclick = createNewChat;
     document.getElementById("refreshModelsBtn").onclick = loadModels;
 
+    var loginError = document.getElementById("qwenLoginError");
+
+    function handleAutoLoginClick() {
+      if (loginError) loginError.textContent = '';
+      var autoLoginBtn = document.getElementById("qwenAutoLoginBtn");
+      var waitingBox = document.getElementById("qwenAutoLoginWaiting");
+      var waitingText = document.getElementById("qwenAutoLoginWaitingText");
+      if (autoLoginBtn) autoLoginBtn.style.display = 'none';
+      if (waitingBox) waitingBox.style.display = 'flex';
+      if (waitingText) waitingText.textContent = 'Launching browser...';
+      if (state.isVsCode && window.VSCODE_API) {
+        window.VSCODE_API.postMessage({ type: 'startQwenBrowserLogin' });
+      }
+    }
+
+    function handleCancelAutoLoginClick() {
+      if (state.isVsCode && window.VSCODE_API) {
+        window.VSCODE_API.postMessage({ type: 'cancelQwenBrowserLogin' });
+      }
+    }
+
+    var autoLoginBtn = document.getElementById("qwenAutoLoginBtn");
+    if (autoLoginBtn) {
+      autoLoginBtn.onclick = handleAutoLoginClick;
+    }
+
+    var cancelAutoLoginBtn = document.getElementById("qwenCancelAutoLoginBtn");
+    if (cancelAutoLoginBtn) {
+      cancelAutoLoginBtn.onclick = handleCancelAutoLoginClick;
+    }
+
     var openLoginBtn = document.getElementById("qwenOpenLoginBtn");
     if (openLoginBtn) {
       openLoginBtn.onclick = function() {
@@ -548,8 +589,6 @@
         }
       };
     }
-
-    var loginError = document.getElementById("qwenLoginError");
 
     var manualConnectBtn = document.getElementById("qwenManualConnectBtn");
     if (manualConnectBtn) {
@@ -1115,6 +1154,14 @@
     if (message.type === "qwenChatIdTransition") {
       window.transitionActiveChatId(message.oldId, message.newId);
     }
+    if (message.type === "qwenLoginWaiting") {
+      var autoLoginBtn = document.getElementById("qwenAutoLoginBtn");
+      var waitingBox = document.getElementById("qwenAutoLoginWaiting");
+      var waitingText = document.getElementById("qwenAutoLoginWaitingText");
+      if (autoLoginBtn) autoLoginBtn.style.display = 'none';
+      if (waitingBox) waitingBox.style.display = 'flex';
+      if (waitingText) waitingText.textContent = message.message || 'Waiting for login in browser...';
+    }
     if (message.type === "qwenAuthState") {
       var authenticated = message.authenticated;
       var error = message.error;
@@ -1126,6 +1173,11 @@
       var railChat = document.getElementById("rail-chat");
       var railSettings = document.getElementById("rail-settings");
       var loginError = document.getElementById("qwenLoginError");
+      var autoLoginBtn = document.getElementById("qwenAutoLoginBtn");
+      var waitingBox = document.getElementById("qwenAutoLoginWaiting");
+
+      if (autoLoginBtn) autoLoginBtn.style.display = '';
+      if (waitingBox) waitingBox.style.display = 'none';
       
       if (authenticated) {
         if (loginPanel) loginPanel.style.display = 'none';
@@ -1178,12 +1230,28 @@
       } else {
         var container = document.getElementById("chat-area-container");
         if (container) {
+          var authActionBtn = '';
+          if (message.isAuthError) {
+            authActionBtn = '<button id="crChatHistorySignInBtn" class="cr-save-btn" style="margin-top: 14px; padding: 10px 18px; font-weight: 600; background: #6366f1; color: #fff; border: none; border-radius: 6px; cursor: pointer;">🚀 1-Click Sign In with Qwen</button>';
+          }
           container.innerHTML =
             '<div class="cr-empty-chat">' +
               '<div class="cr-empty-mark" style="color: #ef4444;">⚠</div>' +
               '<p class="cr-empty-chat-title">Failed to load chat history</p>' +
               '<p class="cr-empty-chat-sub">' + esc(message.error || 'Connection failed') + '</p>' +
+              authActionBtn +
             '</div>';
+
+          var retrySignInBtn = container.querySelector('#crChatHistorySignInBtn');
+          if (retrySignInBtn) {
+            retrySignInBtn.onclick = function() {
+              retrySignInBtn.disabled = true;
+              retrySignInBtn.innerHTML = '⏳ Opening login window...';
+              if (state.isVsCode && window.VSCODE_API) {
+                window.VSCODE_API.postMessage({ type: 'startQwenBrowserLogin' });
+              }
+            };
+          }
         }
       }
     }

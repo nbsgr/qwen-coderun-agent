@@ -65,6 +65,40 @@ export function pick(obj, keys) {
   return result;
 }
 
+export function mergeCookieStrings(baseCookie, newCookie) {
+  var map = {};
+  if (baseCookie) {
+    var p1 = baseCookie.split(';');
+    for (var i = 0; i < p1.length; i++) {
+      var item1 = p1[i].trim();
+      var eq1 = item1.indexOf('=');
+      if (eq1 !== -1) {
+        var k1 = item1.substring(0, eq1).trim();
+        var v1 = item1.substring(eq1 + 1).trim();
+        if (k1) map[k1] = v1;
+      }
+    }
+  }
+  if (newCookie) {
+    var p2 = newCookie.split(';');
+    for (var j = 0; j < p2.length; j++) {
+      var item2 = p2[j].trim();
+      var eq2 = item2.indexOf('=');
+      if (eq2 !== -1) {
+        var k2 = item2.substring(0, eq2).trim();
+        var v2 = item2.substring(eq2 + 1).trim();
+        if (k2) map[k2] = v2;
+      }
+    }
+  }
+  var res = [];
+  var keys = Object.keys(map);
+  for (var k = 0; k < keys.length; k++) {
+    res.push(keys[k] + '=' + map[keys[k]]);
+  }
+  return res.join('; ');
+}
+
 export function mergeDefaults(target, defaults) {
   var result = {};
   for (var k in defaults) {

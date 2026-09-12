@@ -29,8 +29,6 @@ var _pendingDiffs = {};
 /**
  * Resolve a pending diff request. Called by extension.js when the
  * user accepts or rejects a proposed file edit.
- * @param {string} id - The diff request ID
- * @param {boolean} accepted - Whether the user accepted the changes
  */
 export function resolveDiff(id, accepted) {
   if (_pendingDiffs[id]) {
@@ -267,7 +265,15 @@ export async function runAgentLoop(userPrompt, config, options) {
         }
       }
     } catch (err) {
-      sendEvent({ type: EVENT_TYPES.AGENT_ERROR, message: err.message });
+      var isCaptcha = !!err.isCaptcha;
+      var isAuth = !isCaptcha && (!!err.isAuthError || (err.message && (err.message.indexOf('expired') !== -1 || err.message.indexOf('unauthorized') !== -1)));
+      sendEvent({
+        type: EVENT_TYPES.AGENT_ERROR,
+        message: err.message,
+        isAuthError: isAuth,
+        isCaptcha: isCaptcha,
+        captchaUrl: err.captchaUrl
+      });
       throw err;
     }
 

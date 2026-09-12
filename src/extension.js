@@ -19,6 +19,7 @@ import * as projectKnowledge from './projectKnowledge.js';
 import * as checkpointManager from './checkpointManager.js';
 import * as diffManager from './diffManager.js';
 import { PROVIDER_DEFAULTS } from './constants.js';
+import * as browserLoginManager from './browserLoginManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -432,7 +433,7 @@ async function fetchQwenChatsList(context) {
   var headers = await qwenGetHeaders(context);
   if (!headers) {
     console.error('[QWEN_CODERUN] qwenGetHeaders returned null');
-    return null;
+    return { success: false, isAuthError: true, error: 'No Qwen session cookie found.' };
   }
   headers['x-request-id'] = 'req-uuid-' + Date.now();
   
@@ -453,26 +454,31 @@ async function fetchQwenChatsList(context) {
       try {
         var data = JSON.parse(text);
         if (data.success) {
-          return data.data;
+          return { success: true, data: data.data || [] };
         } else {
           console.error('[QWEN_CODERUN] fetchQwenChatsList API success is false:', data);
+          var detailStr = (data.data && data.data.details) || data.message || '';
+          var isAuth = (data.data && data.data.code === 'unauthorized') || (typeof detailStr === 'string' && (detailStr.indexOf('expired') !== -1 || detailStr.indexOf('unauthorized') !== -1)) || (data.ret && JSON.stringify(data.ret).indexOf('FAIL_SYS_USER_VALIDATE') !== -1);
+          return { success: false, isAuthError: isAuth, error: detailStr || 'Failed to list chats' };
         }
       } catch (jsonErr) {
         console.error('[QWEN_CODERUN] fetchQwenChatsList JSON parse error on response:', text.substring(0, 1000));
+        return { success: false, isAuthError: false, error: 'Invalid JSON from Qwen API' };
       }
     } else {
       var errText = await r.text();
       console.error('[QWEN_CODERUN] fetchQwenChatsList HTTP error:', r.status, r.statusText, errText.substring(0, 1000));
+      return { success: false, isAuthError: r.status === 401 || r.status === 403, error: 'HTTP ' + r.status };
     }
   } catch (e) {
     console.error('[QWEN_CODERUN] Error fetching chats list:', e);
+    return { success: false, isAuthError: false, error: e.message };
   }
-  return null;
 }
 
 async function fetchQwenChatDetail(context, chatId) {
   var headers = await qwenGetHeaders(context);
-  if (!headers) return null;
+  if (!headers) return { success: false, isAuthError: true, error: 'No Qwen session cookie found.' };
   headers['x-request-id'] = 'req-uuid-' + Date.now();
   headers['Referer'] = 'https://chat.qwen.ai/c/' + chatId;
   
@@ -492,21 +498,26 @@ async function fetchQwenChatDetail(context, chatId) {
       try {
         var data = JSON.parse(text);
         if (data.success && data.data && data.data.chat) {
-          return data.data.chat.messages || [];
+          return { success: true, messages: data.data.chat.messages || [] };
         } else {
           console.error('[QWEN_CODERUN] fetchQwenChatDetail API success is false or missing data:', data);
+          var detailStr2 = (data.data && data.data.details) || data.message || '';
+          var isAuth2 = (data.data && data.data.code === 'unauthorized') || (typeof detailStr2 === 'string' && (detailStr2.indexOf('expired') !== -1 || detailStr2.indexOf('unauthorized') !== -1)) || (data.ret && JSON.stringify(data.ret).indexOf('FAIL_SYS_USER_VALIDATE') !== -1);
+          return { success: false, isAuthError: isAuth2, error: detailStr2 || 'Failed to fetch details.' };
         }
       } catch (jsonErr) {
         console.error('[QWEN_CODERUN] fetchQwenChatDetail JSON parse error on response:', text.substring(0, 1000));
+        return { success: false, isAuthError: false, error: 'Invalid JSON from Qwen API' };
       }
     } else {
-      var errText = await r.text();
-      console.error('[QWEN_CODERUN] fetchQwenChatDetail HTTP error:', r.status, r.statusText, errText.substring(0, 1000));
+      var errText2 = await r.text();
+      console.error('[QWEN_CODERUN] fetchQwenChatDetail HTTP error:', r.status, r.statusText, errText2.substring(0, 1000));
+      return { success: false, isAuthError: r.status === 401 || r.status === 403, error: 'HTTP ' + r.status };
     }
   } catch (e) {
     console.error('[QWEN_CODERUN] Error fetching chat detail:', e);
+    return { success: false, isAuthError: false, error: e.message };
   }
-  return null;
 }
 
 // =====================================================
@@ -547,19 +558,27 @@ async function handleFrontendMessage(message, webview) {
         }
 
         if (cookie) {
-          webview.postMessage({ type: 'qwenAuthState', authenticated: true });
-          
-          // Fetch active chats list and load in sidebar
           try {
-            var chats = await fetchQwenChatsList(extensionContext);
-            if (chats) {
-              var mappedChats = chats.map(function(c) {
+            var chatListRes = await fetchQwenChatsList(extensionContext);
+            if (chatListRes && chatListRes.success) {
+              webview.postMessage({ type: 'qwenAuthState', authenticated: true });
+              var mappedChats = (chatListRes.data || []).map(function(c) {
                 return { id: c.id, title: c.title || 'Untitled Session' };
               });
               webview.postMessage({ type: 'loadConversations', conversations: JSON.stringify(mappedChats) });
+            } else if (chatListRes && chatListRes.isAuthError) {
+              console.warn('[QWEN_CODERUN] Stored token has expired. Prompting user to log in.');
+              webview.postMessage({
+                type: 'qwenAuthState',
+                authenticated: false,
+                error: 'Your session token has expired. Please sign in again.'
+              });
+            } else {
+              webview.postMessage({ type: 'qwenAuthState', authenticated: true });
             }
           } catch(e) {
-            console.error('[QWEN_CODERUN] Error loading active chats:', e.message);
+            console.error('[QWEN_CODERUN] Error verifying Qwen auth:', e.message);
+            webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: 'Failed to verify Qwen connection: ' + e.message });
           }
         } else {
           webview.postMessage({ type: 'qwenAuthState', authenticated: false });
@@ -687,7 +706,15 @@ async function handleFrontendMessage(message, webview) {
         }
       } catch (err) {
         console.error('[EXTENSION] Agent error:', err);
-        webview.postMessage({ type: 'agentEvent', event: { type: 'stream_error', error: err.message } });
+        var isAuth = !!err.isAuthError || (err.message && (err.message.indexOf('Token has expired') !== -1 || err.message.indexOf('unauthorized') !== -1));
+        webview.postMessage({
+          type: 'agentEvent',
+          event: {
+            type: 'stream_error',
+            error: err.message,
+            isAuthError: isAuth
+          }
+        });
       } finally {
         console.log('[EXTENSION] runAgent finally block');
         if (currentAbortController === abortCtrl) currentAbortController = null;
@@ -803,6 +830,76 @@ async function handleFrontendMessage(message, webview) {
       break;
     }
 
+    case 'startQwenBrowserLogin': {
+      webview.postMessage({ type: 'qwenLoginWaiting', message: 'Opening login window... Please sign in to your Qwen account.' });
+
+      browserLoginManager.startBrowserLogin({
+        url: 'https://chat.qwen.ai',
+        cookieName: 'token'
+      }, async function onLoginSuccess(fullCookieStr, tokenValue, fullLocalStorage) {
+        console.log('[QWEN_CODERUN] Automated login succeeded! Saving cookie & storage...');
+        await config.setApiKey(extensionContext, fullCookieStr);
+        if (fullLocalStorage) {
+          try {
+            await extensionContext.globalState.update('qwen-coderun.localStorage', JSON.stringify(fullLocalStorage));
+          } catch (_) {}
+        }
+
+        try {
+          var testChats = await fetchQwenChatsList(extensionContext);
+          webview.postMessage({ type: 'qwenAuthState', authenticated: true });
+          if (testChats && testChats.success && testChats.data) {
+            var mappedChats = [];
+            for (var k = 0; k < testChats.data.length; k++) {
+              var c = testChats.data[k];
+              mappedChats.push({ id: c.id, title: c.title || 'Untitled Session' });
+            }
+            webview.postMessage({ type: 'loadConversations', conversations: JSON.stringify(mappedChats) });
+          }
+          vscode.window.showInformationMessage('CodeRun: Successfully signed in to Qwen!');
+        } catch (authVerifyErr) {
+          webview.postMessage({ type: 'qwenAuthState', authenticated: true });
+        }
+      }, function onLoginError(err) {
+        console.error('[QWEN_CODERUN] Browser login error:', err);
+        webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: err.message });
+        vscode.window.showErrorMessage('CodeRun Qwen Login Error: ' + err.message);
+      }, function onLoginCancel() {
+        console.log('[QWEN_CODERUN] Browser login was closed or cancelled.');
+        webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: 'Login window was closed.' });
+      });
+      break;
+    }
+
+    case 'cancelQwenBrowserLogin': {
+      browserLoginManager.cancelBrowserLogin();
+      webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: 'Login cancelled.' });
+      break;
+    }
+
+    case 'solveQwenCaptcha': {
+      var captchaUrl = message.captchaUrl || 'https://chat.qwen.ai';
+      webview.postMessage({ type: 'qwenCaptchaWaiting', message: 'Opening verification window... Please complete the slider puzzle.' });
+
+      browserLoginManager.startCaptchaVerification({
+        url: captchaUrl,
+        existingCookie: config.getApiKey()
+      }, async function onCaptchaSuccess(fullCookieStr) {
+        console.log('[QWEN_CODERUN] Captcha solved! Saving updated cookies with x5sec...');
+        await config.setApiKey(extensionContext, fullCookieStr);
+        webview.postMessage({ type: 'qwenCaptchaResolved', message: 'Verification completed! You can now continue.' });
+        vscode.window.showInformationMessage('CodeRun: Qwen security verification completed!');
+      }, function onCaptchaError(err) {
+        console.error('[QWEN_CODERUN] Captcha verification error:', err);
+        webview.postMessage({ type: 'qwenCaptchaFailed', error: err.message });
+        vscode.window.showErrorMessage('CodeRun Verification Error: ' + err.message);
+      }, function onCaptchaCancel() {
+        console.log('[QWEN_CODERUN] Verification window was closed.');
+        webview.postMessage({ type: 'qwenCaptchaFailed', error: 'Verification window was closed.' });
+      });
+      break;
+    }
+
     case 'loginQwen': {
       var pastedCookie = message.cookie || '';
       if (!pastedCookie) {
@@ -814,15 +911,16 @@ async function handleFrontendMessage(message, webview) {
       
       try {
         var testChats = await fetchQwenChatsList(extensionContext);
-        if (testChats) {
+        if (testChats && testChats.success) {
           webview.postMessage({ type: 'qwenAuthState', authenticated: true });
-          var mappedChats = testChats.map(function(c) {
+          var mappedChats = (testChats.data || []).map(function(c) {
             return { id: c.id, title: c.title || 'Untitled Session' };
           });
           webview.postMessage({ type: 'loadConversations', conversations: JSON.stringify(mappedChats) });
         } else {
           await config.deleteApiKey(extensionContext);
-          webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: 'Invalid cookie. Please copy the fresh headers cookie string from chat.qwen.ai.' });
+          var errMsg = (testChats && testChats.error) || 'Invalid cookie. Please copy the fresh headers cookie string from chat.qwen.ai.';
+          webview.postMessage({ type: 'qwenAuthState', authenticated: false, error: errMsg });
         }
       } catch(e) {
         await config.deleteApiKey(extensionContext);
@@ -840,8 +938,9 @@ async function handleFrontendMessage(message, webview) {
     case 'getQwenChatDetail': {
       var chatId = message.chatId;
       try {
-        var rawMessages = await fetchQwenChatDetail(extensionContext, chatId);
-        if (rawMessages) {
+        var detailRes = await fetchQwenChatDetail(extensionContext, chatId);
+        if (detailRes && detailRes.success && detailRes.messages) {
+          var rawMessages = detailRes.messages;
           // ── Helpers to reconstruct agent-style messages from flat Qwen history ──
           // Qwen stores tool results as user messages with [System tool execution result]:
           // and tool calls as ```json { tool_calls: [...] } blocks inside assistant text.
@@ -953,7 +1052,21 @@ async function handleFrontendMessage(message, webview) {
 
           webview.postMessage({ type: 'qwenChatDetail', success: true, chatId: chatId, messages: formattedMessages });
         } else {
-          webview.postMessage({ type: 'qwenChatDetail', success: false, error: 'Failed to fetch details.' });
+          var isAuthDetail = detailRes && detailRes.isAuthError;
+          if (isAuthDetail) {
+            console.warn('[QWEN_CODERUN] getQwenChatDetail auth failed. Prompting user to log in.');
+            webview.postMessage({
+              type: 'qwenAuthState',
+              authenticated: false,
+              error: 'Your session token has expired. Please sign in again.'
+            });
+          }
+          webview.postMessage({
+            type: 'qwenChatDetail',
+            success: false,
+            isAuthError: isAuthDetail,
+            error: (detailRes && detailRes.error) || 'Failed to fetch details.'
+          });
         }
       } catch(e) {
         webview.postMessage({ type: 'qwenChatDetail', success: false, error: e.message });

@@ -1,16 +1,45 @@
 {
-  "timestamp": "2026-07-26T01:22:08.061Z",
+  "timestamp": "2026-09-12T13:45:24.162Z",
   "hasExtensionContext": true,
-  "cookieLength": 307,
-  "cookieStart": "token=eyJhbGciOiJIUzI1NiIsInR5",
+  "cookieLength": 2427,
+  "cookieStart": "acw_tc=0a03e594178921988916870",
   "globalStateKeys": [
     "qwen-coderun_selected_model",
     "qwen-coderun_selected_provider",
     "qwen-coderun_provider_configs",
     "qwen-coderun_conversations",
-    "qwen-coderun.fallbackCookie"
+    "qwen-coderun.fallbackCookie",
+    "qwen-coderun.localStorage"
   ]
 }
-[MSG] 2026-07-26T01:22:09.381Z - saveSelectedModel
+[MSG] 2026-09-12T13:45:30.526Z - saveSelectedModel
 
-[MSG] 2026-07-26T01:22:11.502Z - getQwenChatDetail
+[MSG] 2026-09-12T13:45:30.531Z - getQwenChatDetail
+
+[MSG] 2026-09-12T13:45:36.203Z - saveConversations
+
+[MSG] 2026-09-12T13:45:36.213Z - startChat
+
+[MSG] 2026-09-12T13:45:40.074Z - saveConversations
+
+[MSG] 2026-09-12T13:46:15.068Z - saveConversations
+
+[MSG] 2026-09-12T13:46:15.080Z - startChat
+
+[MSG] 2026-09-12T13:46:20.309Z - saveConversations
+
+[MSG] 2026-09-12T13:46:27.282Z - saveConversations
+
+[MSG] 2026-09-12T13:46:27.289Z - startChat
+
+[MSG] 2026-09-12T13:46:34.249Z - permissionResponse
+
+[MSG] 2026-09-12T13:46:35.229Z - acceptDiff
+
+[MSG] 2026-09-12T13:46:38.956Z - saveConversations
+
+[MSG] 2026-09-12T13:46:44.443Z - saveConversations
+
+[MSG] 2026-09-12T13:46:44.452Z - startChat
+
+[MSG] 2026-09-12T13:46:49.065Z - saveConversations

@@ -246,6 +246,7 @@
         S._currentCheckpoints = [];
         S.timeline = null;
         S._toolCalls = [];
+        S._lastErrorText = null;
         if (todosPanel) {
           if (conversation && conversation.plan) {
             renderTodos(conversation.plan);
@@ -669,7 +670,7 @@
                 return;
               }
               if (ev.type === 'stream_error') {
-                handleStreamError(ev.error);
+                handleStreamError(ev.error, ev.isAuthError, ev.isCaptcha, ev.captchaUrl);
                 onStreamError(ev.error);
                 window.activeChatStreamCallback = null;
                 return;
@@ -914,11 +915,96 @@
         }
       }
 
-      function handleStreamError(err) {
+      function renderCaptchaCard(botBody, captchaUrl) {
+        var existing = document.getElementById('cr-active-captcha-card');
+        if (existing) {
+          existing.removeAttribute('id');
+        }
+        var card = mk('div', 'cr-auth-card cr-captcha-card');
+        card.id = 'cr-active-captcha-card';
+        card.innerHTML =
+          '<div class="cr-auth-card-inner">' +
+            '<div class="cr-auth-card-icon" style="color: #60a5fa;">' +
+              '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>' +
+            '</div>' +
+            '<div class="cr-auth-card-content">' +
+              '<div class="cr-auth-card-title">Security Verification Required</div>' +
+              '<div class="cr-auth-card-desc">Alibaba Cloud requires a one-time slider verification puzzle before sending messages.</div>' +
+              '<div class="cr-auth-card-actions">' +
+                '<button id="crCaptchaSolveBtn" class="cr-auth-btn-primary" style="background: #2563eb;">🛡️ Complete Slider Verification</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+
+        var btn = card.querySelector('#crCaptchaSolveBtn');
+        if (btn) {
+          btn.onclick = function() {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Opening verification window...';
+            if (window.VSCODE_API) {
+              window.VSCODE_API.postMessage({ type: 'solveQwenCaptcha', captchaUrl: captchaUrl });
+            }
+          };
+        }
+        if (botBody) botBody.appendChild(card);
+      }
+
+      function renderAuthErrorCard(botBody) {
+        var existing = document.getElementById('cr-active-auth-card');
+        if (existing) {
+          existing.removeAttribute('id');
+        }
+        var card = mk('div', 'cr-auth-card');
+        card.id = 'cr-active-auth-card';
+        card.innerHTML =
+          '<div class="cr-auth-card-inner">' +
+            '<div class="cr-auth-card-icon">' +
+              '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>' +
+            '</div>' +
+            '<div class="cr-auth-card-content">' +
+              '<div class="cr-auth-card-title">Qwen Session Expired</div>' +
+              '<div class="cr-auth-card-desc">Your Qwen session token has expired. Sign in again to continue your conversation.</div>' +
+              '<div class="cr-auth-card-actions">' +
+                '<button id="crAuthSignInBtn" class="cr-auth-btn-primary">🚀 1-Click Sign In with Qwen</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+
+        var btn = card.querySelector('#crAuthSignInBtn');
+        if (btn) {
+          btn.onclick = function() {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Opening login window...';
+            if (window.VSCODE_API) {
+              window.VSCODE_API.postMessage({ type: 'startQwenBrowserLogin' });
+            }
+          };
+        }
+        if (botBody) botBody.appendChild(card);
+      }
+
+      function handleStreamError(err, isAuthError, isCaptcha, captchaUrl) {
         removeTyping(S.botBody);
-        var e = mk('div', 'cr-error-line');
-        e.innerHTML = I.err + ' Error: ' + esc(err && err.message || String(err));
-        if (S.botBody) S.botBody.appendChild(e);
+        var errStr = String(err && err.message || err || '');
+        var normalized = errStr.replace(/^Error:\s*/i, '').trim();
+
+        if (S._lastErrorText === normalized) {
+          setStreaming(false);
+          return;
+        }
+        S._lastErrorText = normalized;
+
+        var isCap = isCaptcha || normalized.indexOf('slider verification') !== -1 || normalized.indexOf('FAIL_SYS_USER_VALIDATE') !== -1 || normalized.indexOf('security verification') !== -1;
+        var isAuth = !isCap && (isAuthError || normalized.indexOf('Token has expired') !== -1 || normalized.indexOf('unauthorized') !== -1 || normalized.indexOf('HTTP 401') !== -1);
+        if (isCap) {
+          renderCaptchaCard(S.botBody, captchaUrl);
+        } else if (isAuth) {
+          renderAuthErrorCard(S.botBody);
+        } else {
+          var e = mk('div', 'cr-error-line');
+          e.innerHTML = I.err + ' Error: ' + esc(normalized);
+          if (S.botBody) S.botBody.appendChild(e);
+        }
         setStreaming(false);
         scrollBottom(msgList);
       }
@@ -1328,9 +1414,24 @@
             case 'agent_error':
             case 'error': {
               removeTyping(S.botBody);
-              var errDiv = mk('div', 'cr-error-line');
-              errDiv.innerHTML = I.err + ' ' + esc(ev.message || ev.error || 'Error from agent');
-              if (S.botBody) S.botBody.appendChild(errDiv);
+              var rawMsg = String(ev.message || ev.error || 'Error from agent');
+              var normMsg = rawMsg.replace(/^Error:\s*/i, '').trim();
+              if (S._lastErrorText === normMsg) {
+                clearStatusLines(S);
+                break;
+              }
+              S._lastErrorText = normMsg;
+              var isCapMsg = ev.isCaptcha || normMsg.indexOf('slider verification') !== -1 || normMsg.indexOf('FAIL_SYS_USER_VALIDATE') !== -1 || normMsg.indexOf('security verification') !== -1;
+              var isAuthMsg = !isCapMsg && (ev.isAuthError || normMsg.indexOf('Token has expired') !== -1 || normMsg.indexOf('unauthorized') !== -1 || normMsg.indexOf('HTTP 401') !== -1);
+              if (isCapMsg) {
+                renderCaptchaCard(S.botBody, ev.captchaUrl);
+              } else if (isAuthMsg) {
+                renderAuthErrorCard(S.botBody);
+              } else {
+                var errDiv = mk('div', 'cr-error-line');
+                errDiv.innerHTML = I.err + ' ' + esc(normMsg);
+                if (S.botBody) S.botBody.appendChild(errDiv);
+              }
               clearStatusLines(S);
               break;
             }
@@ -2762,6 +2863,56 @@
     if (message.type === 'undoCheckpointResult' && message.filePath) {
       if (window.updateActionsBarStatus) {
         window.updateActionsBarStatus(message.filePath, message.success ? 'Restored' : 'Failed');
+      }
+    }
+
+    // Handle Qwen Auth State update
+    if (message.type === 'qwenAuthState') {
+      var authCard = document.getElementById('cr-active-auth-card');
+      if (authCard) {
+        if (message.authenticated) {
+          authCard.innerHTML =
+            '<div class="cr-auth-card-inner cr-auth-success">' +
+              '<div class="cr-auth-card-icon cr-auth-icon-success">' +
+                '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' +
+              '</div>' +
+              '<div class="cr-auth-card-content">' +
+                '<div class="cr-auth-card-title" style="color: #10b981;">Signed In Successfully!</div>' +
+                '<div class="cr-auth-card-desc">Session token renewed. You can now send messages.</div>' +
+              '</div>' +
+            '</div>';
+        } else if (message.error) {
+          var authBtn = document.getElementById('crAuthSignInBtn');
+          if (authBtn) {
+            authBtn.disabled = false;
+            authBtn.innerHTML = '🚀 1-Click Sign In with Qwen';
+          }
+        }
+      }
+    }
+
+    // Handle Qwen Captcha Resolved update
+    if (message.type === 'qwenCaptchaResolved') {
+      var capCard = document.getElementById('cr-active-captcha-card');
+      if (capCard) {
+        capCard.innerHTML =
+          '<div class="cr-auth-card-inner cr-auth-success">' +
+            '<div class="cr-auth-card-icon cr-auth-icon-success">' +
+              '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' +
+            '</div>' +
+            '<div class="cr-auth-card-content">' +
+              '<div class="cr-auth-card-title" style="color: #10b981;">Verification Complete!</div>' +
+              '<div class="cr-auth-card-desc">Security check passed. You can now send messages.</div>' +
+            '</div>' +
+          '</div>';
+      }
+    }
+
+    if (message.type === 'qwenCaptchaFailed') {
+      var capBtn = document.getElementById('crCaptchaSolveBtn');
+      if (capBtn) {
+        capBtn.disabled = false;
+        capBtn.innerHTML = '🛡️ Complete Slider Verification';
       }
     }
   });

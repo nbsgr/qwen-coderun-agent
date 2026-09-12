@@ -5,6 +5,17 @@ import { handleApiResponseError } from './utils.js';
 
 let activeQwenChatId = null;
 
+function isValidQwenChatId(id) {
+  if (!id || typeof id !== 'string') {
+    return false;
+  }
+  if (id.startsWith('new-') || id.startsWith('conv_') || id.startsWith('session_')) {
+    return false;
+  }
+  var uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
+}
+
 export async function* chat(config, messages, tools) {
   // messages: FULL messages array built by promptBuilder + agentLoop.
   // We serialize the entire conversation into a single Qwen user message
@@ -23,7 +34,7 @@ export async function* chat(config, messages, tools) {
   var serialized = serializeMessages(messages, systemContent, tools);
 
   // Sync the active Qwen chat ID from the config (passed from extension host)
-  if (config.chatId && !config.chatId.startsWith('new-')) {
+  if (isValidQwenChatId(config.chatId)) {
     activeQwenChatId = config.chatId;
   } else {
     activeQwenChatId = null;
@@ -51,64 +62,128 @@ export async function* chat(config, messages, tools) {
     }
   }
 
+  var bxUa = '234!t6OeKjrieePWr1PjjV4mwLmK48zJRd8FTTr55qiMD9dRMXOLA/2rqixq7SAwJ9Ie1K64UlwUoXPgZeWAEjvyoxLuZOvpd5Li3S7UmQHGnXrd8TjDjnf6DtXpsQFHAkJKSzIP7S9jnBDpHYqJUOPFBOCiGhtfHaCKmkPWTx0DNQmOJJ6J/DT9rLgFeZUrIbWX0La5AgVA/1IZn3UH9AJ7hwN+OUcOCd2gcP0aOQJNirLZZ3wH9idThpoZnkp/cAjenL5cQCyNescZn3UH9AVE6sZZ8ks/c24HeIoHOQYNhstZZ3wd9iJTCP2ZQkkwgsXH+lodOQ5NhsgiZ6Wd9iyoCvr+8Lkfcs4H+JWyQCyNhsfkZ3wd9ib2CvV+vkkhc2r7ZZodQCymhxuZVkUd9Ad7TZzZQkpvxOuyHVEHQQVmhxWZn3UJI4C8jRxZQ+kvc24TieCdQQymhskreLwH9idThnoZQpp/cs47ZJDxQC5Ovf1vSy+kKwbbBIoZQpsvc2PTYGwTQoVIhMaUekUM98edFVtZVY3QcM5Tn3ZEQCNmNkCZYLb39AdThrnZQLrOcMPTB/o9QCymhuxZekUH9AHb2c/NOARsoNvDAdHUePkbWoOvsUH2XTnfgIWAfVFu+7vqgyhrvdNaW1pb2jDq8ruAgAY5azNqoO5XcVVuBwmfEiIyAT+EVuc7En+OfbGuJRvv5eCurEmM6IkXp48DiBkI9qjmQe1Y+VHVhs/1mBaXBja/dqTPGVt4sr/ggEWFukX29KKoboI445AKjgR3DUpzecCEP/6DcMjKvzzzIm3CHOn7ZZwnAdIkdzKfclmLqfz3ALiWyQTQSxrRugB27Z3aVM6QX5+mlbtp3ZDoNas4u3vjUgueEk/E8xmyj0fEbnC/cKPbuxNTRgMZgHiCkXO4jEg7TtmXbdH4e1H6pqxqyj357FwExCtVNILqE7qcmw5OfLwSC1WHq1va5AlhdlcAZKAefbYnNbflnj+fVli6XfIl0KmzzzdsrLa3B8EESE1EkyPzTvfz0Bcn8RUYGKijqXyAdM7RAbAQhrNzGzRFBVVZoubREv1+sSc3zCsyXRPS8GIE5rqKO2PQZcoHZ5Xfw2VlBhiYGo3KhbTtZmZmOcixLj61U1wYqpFp7jspa+4SPJtl9gGKoHrQGja1hTIhiw/32YdoX2HKeemUWwSBo30Et+r4L+9usjb+NH4Oflq0UXtarsdCq1QElvpdA9BxqUXX+h/SzEqx4suD6IK8ORThuszcuzB9ukGKTX5jDE7+pQF8sEUdnQh1zXx/KN2PcYI0+Yw769RxwUb7zsWqo9z0ahlY52Cddr8j7fFkq9gVajuHmXuGRJUXDgJnHDqIpQs3sGYYTs0QJdNF5jq4xLNfcqugoNZMcDPu6V6Qeol1PagMdE+ssx4muDCuolycTXkqX7yAe+YwFjrMZWtb5Yyik/aKsqfD8ewvHpRwQGfP2oD4+J1VPG1BL6EgUJKqzf+M8xDgY0FmdYMJHrirYMf6gDdjlsmdio3LVCn28kaL/pn5HZSqzUIwvMjfw6olekKL5l0l6gOdSc/4c6xkXRjkkcK0vie+saJ2pavuiBKTxgyS/50k6QPKQnBWC19dG5R9GPZ1ZXEnnPVfGMWbBYgRXic6BjHjx7/jzSG57rtvtDMj4NhVsGVFYSAbMxWGFvn3THyqv37zsoYvmB5wrR9qWoDTV+p6pCtElyuS/oVYbLVIhrORf3hlsjrm+hvQk1XwIvKQIRqX2vy3ScanXL5QHDwiNc3kc8nTdSrczDzmCjp3GWbkkwqyMSIELCzI5NVPtMPl3fb5jNwgAhek';
+  var bxUmidtoken = 'T2gAKSKQ-DRnLVZ5DYO63YR7SODE7IYEVg07M27F3ju0tJ5h6Z1NtMNDO8ocN4JoarA=';
+
+  for (var pIdx = 0; pIdx < parts.length; pIdx++) {
+    var pItem = parts[pIdx].trim();
+    if (pItem.startsWith('bx_ua=')) bxUa = pItem.substring(6);
+    if (pItem.startsWith('bx_umidtoken=')) bxUmidtoken = pItem.substring(13);
+  }
+
   // Helper to build headers
-  var getHeaders = function(chatId = '') {
+  function getHeaders(chatId) {
     var h = {
-      'Accept': 'application/json, text/plain, */*',
+      'Accept': 'text/event-stream, application/json, */*',
       'Accept-Language': 'en-US,en;q=0.9',
+      'bx-ua': bxUa,
+      'bx-umidtoken': bxUmidtoken,
+      'bx-v': '2.5.37',
       'Connection': 'keep-alive',
       'Content-Type': 'application/json',
+      'dnt': '1',
       'Host': 'chat.qwen.ai',
-      'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Chromium";v="148"',
-      'Sec-Ch-Ua-Mobile': '?0',
-      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Origin': 'https://chat.qwen.ai',
+      'Sec-Ch-Ua': '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
+      'Sec-Ch-Ua-Mobile': '?1',
+      'Sec-Ch-Ua-Platform': '"Android"',
       'Sec-Fetch-Dest': 'empty',
       'Sec-Fetch-Mode': 'cors',
       'Sec-Fetch-Site': 'same-origin',
-      'source': 'web',
-      'timezone': 'Fri Jul 24 2026 15:13:30 GMT+0530',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.130.0 Chrome/148.0.7778.280 Electron/42.6.0 Safari/537.36',
-      'version': '0.2.78',
+      'source': 'h5',
+      'timezone': 'Sat Sep 12 2026 18:31:07 GMT+0530',
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36',
+      'version': '0.2.91',
+      'x-accel-buffering': 'no',
       'x-request-id': getUuid(),
       'Cookie': cookieStr
     };
-    if (token) h['authorization'] = 'Bearer ' + token;
-    if (chatId) h['Referer'] = 'https://chat.qwen.ai/c/' + chatId;
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    if (chatId) {
+      h['Referer'] = 'https://chat.qwen.ai/c/' + chatId;
+    } else {
+      h['Referer'] = 'https://chat.qwen.ai/';
+    }
     return h;
-  };
+  }
 
-  var qwenModel = config.model || 'qwen3.7-max';
+  var qwenModel = config.model || 'qwen3.7-plus';
 
-  // If no chat_id exists, initialize a new chat session on Qwen
+  async function createNewQwenChat() {
+    var newChatUrl = 'https://chat.qwen.ai/api/v2/chats/new';
+    var newChatPayload = {
+      title: 'Qwen CodeRun Chat',
+      models: [qwenModel],
+      chat_mode: 'normal',
+      chat_type: 't2t',
+      timestamp: Date.now()
+    };
+    
+    var newChatRes = await fetch(newChatUrl, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(newChatPayload)
+    });
+    
+    var newChatContentType = (newChatRes.headers.get('content-type') || '').toLowerCase();
+    if (!newChatRes.ok) {
+      if (newChatRes.status === 401 || newChatRes.status === 403) {
+        var authErr1 = new Error('Qwen session token expired. Please log in again.');
+        authErr1.isAuthError = true;
+        authErr1.code = 'UNAUTHORIZED';
+        throw authErr1;
+      }
+      throw new Error('HTTP error creating chat: ' + newChatRes.status);
+    }
+
+    if (newChatContentType.indexOf('text/html') !== -1) {
+      var wafErr = new Error('Alibaba Cloud security verification required. Please complete verification in browser.');
+      wafErr.isCaptcha = true;
+      wafErr.captchaUrl = 'https://chat.qwen.ai';
+      throw wafErr;
+    }
+    
+    var newChatData = await newChatRes.json();
+    if (newChatData && newChatData.success && newChatData.data && newChatData.data.id) {
+      activeQwenChatId = newChatData.data.id;
+      config.chatId = activeQwenChatId;
+      return activeQwenChatId;
+    } else {
+      var errRet = JSON.stringify(newChatData && newChatData.ret || '');
+      var errUrl = (newChatData && newChatData.data && newChatData.data.url) || '';
+      if (errRet.indexOf('FAIL_SYS_USER_VALIDATE') !== -1 || errUrl.indexOf('captcha') !== -1 || errUrl.indexOf('punish') !== -1) {
+        var captchaErr = new Error('Alibaba Cloud security verification required (slider captcha).');
+        captchaErr.isCaptcha = true;
+        captchaErr.captchaUrl = errUrl || 'https://chat.qwen.ai';
+        throw captchaErr;
+      }
+      var errCode = newChatData && newChatData.data && newChatData.data.code;
+      var errDetails = newChatData && newChatData.data && newChatData.data.details;
+      if (errCode === 'unauthorized') {
+        var authErr2 = new Error('Qwen session token expired. Please log in again.');
+        authErr2.isAuthError = true;
+        authErr2.code = 'UNAUTHORIZED';
+        throw authErr2;
+      }
+      throw new Error('Qwen failed to return a new Chat ID: ' + (errDetails || JSON.stringify(newChatData)));
+    }
+  }
+
+  // If no valid chat_id exists, initialize a new chat session on Qwen
   if (!activeQwenChatId) {
     try {
-      var newChatUrl = 'https://chat.qwen.ai/api/v2/chats/new';
-      var newChatPayload = {
-        title: 'Qwen CodeRun Chat',
-        models: [qwenModel],
-        chat_mode: 'normal',
-        chat_type: 't2t',
-        timestamp: Date.now()
-      };
-      
-      var newChatRes = await fetch(newChatUrl, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(newChatPayload)
-      });
-      
-      if (!newChatRes.ok) {
-        throw new Error('HTTP error creating chat: ' + newChatRes.status);
-      }
-      
-      var newChatData = await newChatRes.json();
-      if (newChatData && newChatData.success && newChatData.data && newChatData.data.id) {
-        activeQwenChatId = newChatData.data.id;
-        config.chatId = activeQwenChatId;
-      } else {
-        throw new Error('Qwen failed to return a new Chat ID: ' + JSON.stringify(newChatData));
-      }
+      await createNewQwenChat();
     } catch (err) {
+      if (err.isAuthError || err.isCaptcha) {
+        throw err;
+      }
+      var msg = err.message || '';
+      if (msg.indexOf('unauthorized') !== -1) {
+        var expErr = new Error('Qwen session token expired. Please log in again.');
+        expErr.isAuthError = true;
+        expErr.code = 'UNAUTHORIZED';
+        throw expErr;
+      }
       throw new Error('Failed to initialize Qwen chat session: ' + err.message);
     }
   }
@@ -117,9 +192,6 @@ export async function* chat(config, messages, tools) {
   var url = 'https://chat.qwen.ai/api/v2/chat/completions?chat_id=' + activeQwenChatId;
 
   // Send the FULL serialized conversation as a single user message.
-  // This is how we maintain our own context management: the serialized
-  // blob contains system prompt + tool defs + entire conversation history
-  // + the current request, so Qwen always sees the full picture.
   var qwenRole = 'user';
   var qwenContent = serialized;
 
@@ -136,7 +208,7 @@ export async function* chat(config, messages, tools) {
     chat_type: 't2t',
     feature_config: {
       output_schema: 'phase',
-      thinking_enabled: true
+      thinking_enabled: false
     },
     extra: { meta: { subChatType: 't2t' } },
     sub_chat_type: 't2t',
@@ -144,11 +216,13 @@ export async function* chat(config, messages, tools) {
   };
 
   var body = {
-    stream: true,
-    incremental_output: true,
+    chatId: activeQwenChatId,
     chat_id: activeQwenChatId,
     chat_mode: 'normal',
+    incremental_output: true,
     model: qwenModel,
+    stream: true,
+    version: '2.1',
     parent_id: null,
     messages: [payloadMsg],
     timestamp: Date.now()
@@ -160,8 +234,91 @@ export async function* chat(config, messages, tools) {
     body: JSON.stringify(body)
   });
 
+  var contentType = (response.headers.get('content-type') || '').toLowerCase();
+
   if (!response.ok) {
-    throw await handleApiResponseError(response, 'Qwen');
+    if (response.status === 401 || response.status === 403) {
+      var authErr3 = new Error('Qwen session token expired. Please log in again.');
+      authErr3.isAuthError = true;
+      authErr3.code = 'UNAUTHORIZED';
+      throw authErr3;
+    }
+    if (response.status === 400 || response.status === 404) {
+      console.log('[QWEN] Chat session returned HTTP ' + response.status + '. Automatically creating a fresh session...');
+      await createNewQwenChat();
+      url = 'https://chat.qwen.ai/api/v2/chat/completions?chat_id=' + activeQwenChatId;
+      body.chatId = activeQwenChatId;
+      body.chat_id = activeQwenChatId;
+      response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(activeQwenChatId),
+        body: JSON.stringify(body)
+      });
+      contentType = (response.headers.get('content-type') || '').toLowerCase();
+    }
+    if (!response.ok) {
+      throw await handleApiResponseError(response, 'Qwen');
+    }
+  }
+
+  // Handle non-SSE responses returned with HTTP 200 (Alibaba Captcha / WAF blocks / JSON errors)
+  if (contentType.indexOf('application/json') !== -1) {
+    var jsonErrData = {};
+    try {
+      jsonErrData = await response.json();
+    } catch (_) {}
+
+    var retStr = JSON.stringify(jsonErrData.ret || '');
+    var dataUrl = (jsonErrData.data && jsonErrData.data.url) || '';
+    if (retStr.indexOf('FAIL_SYS_USER_VALIDATE') !== -1 || dataUrl.indexOf('captcha') !== -1 || dataUrl.indexOf('punish') !== -1) {
+      var compCaptchaErr = new Error('Alibaba Cloud security verification required (slider captcha).');
+      compCaptchaErr.isCaptcha = true;
+      compCaptchaErr.captchaUrl = dataUrl || 'https://chat.qwen.ai';
+      compCaptchaErr.chatId = activeQwenChatId;
+      throw compCaptchaErr;
+    }
+
+    var code = (jsonErrData.data && jsonErrData.data.code) || jsonErrData.code || '';
+    var details = (jsonErrData.data && jsonErrData.data.details) || jsonErrData.message || jsonErrData.details || '';
+
+    if (details && (details.indexOf('deleted') !== -1 || details.indexOf('not found') !== -1 || details.indexOf('not exist') !== -1)) {
+      console.log('[QWEN] Chat session was deleted or not found. Automatically creating a fresh session...');
+      await createNewQwenChat();
+      url = 'https://chat.qwen.ai/api/v2/chat/completions?chat_id=' + activeQwenChatId;
+      body.chatId = activeQwenChatId;
+      body.chat_id = activeQwenChatId;
+      response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(activeQwenChatId),
+        body: JSON.stringify(body)
+      });
+      contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (contentType.indexOf('application/json') !== -1) {
+        try {
+          jsonErrData = await response.json();
+          code = (jsonErrData.data && jsonErrData.data.code) || jsonErrData.code || '';
+          details = (jsonErrData.data && jsonErrData.data.details) || jsonErrData.message || jsonErrData.details || '';
+        } catch (_) {}
+      }
+    }
+
+    if (code === 'unauthorized') {
+      var authErrJson = new Error('Qwen session token expired. Please log in again.');
+      authErrJson.isAuthError = true;
+      authErrJson.code = 'UNAUTHORIZED';
+      throw authErrJson;
+    }
+
+    if (contentType.indexOf('application/json') !== -1) {
+      throw new Error('Qwen API Error: ' + (details || JSON.stringify(jsonErrData)));
+    }
+  }
+
+  if (contentType.indexOf('text/html') !== -1) {
+    var compHtmlErr = new Error('Alibaba Cloud security challenge detected (WAF HTML). Please complete verification in browser.');
+    compHtmlErr.isCaptcha = true;
+    compHtmlErr.captchaUrl = 'https://chat.qwen.ai';
+    throw compHtmlErr;
   }
 
   var setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : (response.headers.get('set-cookie') ? response.headers.get('set-cookie').split(',') : null);
@@ -202,6 +359,27 @@ export async function* chat(config, messages, tools) {
         if (dataStr.trim() === '[DONE]') break;
         try {
           var data = JSON.parse(dataStr);
+          if (data && data.success === false) {
+            var sseErrMsg = (data.data && data.data.details) || data.message || data.details || JSON.stringify(data);
+            var sseErr = new Error(sseErrMsg);
+            if (data.code === 'unauthorized' || (data.data && data.data.code === 'unauthorized') || (typeof sseErrMsg === 'string' && (sseErrMsg.indexOf('expired') !== -1 || sseErrMsg.indexOf('unauthorized') !== -1))) {
+              sseErr.isAuthError = true;
+              sseErr.code = 'UNAUTHORIZED';
+            }
+            throw sseErr;
+          }
+          if (data && data.ret && JSON.stringify(data.ret).indexOf('FAIL_SYS_USER_VALIDATE') !== -1) {
+            var sseCaptchaErr = new Error('Alibaba Cloud slider verification required.');
+            sseCaptchaErr.isCaptcha = true;
+            sseCaptchaErr.captchaUrl = (data.data && data.data.url) || 'https://chat.qwen.ai';
+            throw sseCaptchaErr;
+          }
+          if (data && data.code === 'unauthorized') {
+            var sseAuthErr = new Error('Qwen session token expired. Please log in again.');
+            sseAuthErr.isAuthError = true;
+            sseAuthErr.code = 'UNAUTHORIZED';
+            throw sseAuthErr;
+          }
           var choice = data.choices?.[0];
           if (choice) {
             var delta = choice.delta || {};
@@ -365,6 +543,13 @@ export async function* chat(config, messages, tools) {
 
   if (isHidingToolCall && hideBuffer) {
     yield { content: hideBuffer };
+    accumContent += hideBuffer;
+  }
+
+  if (!accumContent && yieldedToolCallIds.size === 0) {
+    var emptyStreamErr = new Error('Qwen returned an empty response. The connection may have timed out or been interrupted.');
+    emptyStreamErr.isAuthError = false;
+    throw emptyStreamErr;
   }
 }
 
