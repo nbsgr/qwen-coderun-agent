@@ -4,106 +4,127 @@
   <img src="./logo.png" width="160" alt="CodeRun Logo"/>
 </p>
 
+[![Version: 1.2.0](https://img.shields.io/badge/version-1.2.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 [![GitHub](https://img.shields.io/badge/GitHub-nbsgr/qwen--coderun--agent-blue?logo=github)](https://github.com/nbsgr/qwen-coderun-agent)
 
-**CodeRun AI Agent** is a VS Code extension that uses **Qwen 3.7 through the browser API** (`chat.qwen.ai`) as an autonomous coding agent. It operates via a Think → Plan → Act → Verify loop, reading/writing/editing files, running terminal commands, and searching code — all by embedding tool calls as text JSON blocks in the conversation.
+**CodeRun AI Agent** is an autonomous coding agent for VS Code powered by **Qwen 3.7 through the browser API** (`chat.qwen.ai`). It executes complex development workflows via an iterative Think → Plan → Act → Verify loop: reading, writing, and editing files, running terminal commands, searching codebases, inspecting user screenshots, and generating images natively with **Qwen Wanx** — all with complete local context management and tool permission controls.
 
 ---
 
 ## 🌟 How It Works
 
-Unlike traditional AI extensions that use native function-calling APIs, CodeRun communicates with Qwen through the **browser chat API** — the same API the `chat.qwen.ai` website uses. Tool calls are embedded as ````json {"tool_calls":[...]}```` blocks in Qwen's response text, then parsed and executed by the extension.
+Unlike traditional AI extensions that rely on standard OpenAI-compatible endpoints with metered billing, CodeRun communicates directly with Qwen through the **browser chat API** — the same API powering `chat.qwen.ai`.
 
 ```
-User Prompt → Extension → Qwen Browser API → Qwen responds with text
-  → Extension parses ```json {tool_calls}``` blocks
-  → Executes tools (read_file, write_file, run_terminal, etc.)
-  → Sends results back to Qwen as next user message
-  → Loop continues until task is complete
+User Prompt (+ Images/Docs) → Extension → Qwen Browser API → SSE Response Stream
+  → Streaming JSON extractor parses reasoning, content, & tool_calls on the fly
+  → Executes tools (read_file, write_file, run_terminal, image_gen, etc.)
+  → Tool results fed back into context array
+  → Loop iterates until task completion (finish_reason: "stop")
 ```
+
+---
 
 ## 🔑 Features
 
 | Feature | Description |
-|---------|-------------|
-| **Agent Loop** | Multi-iteration Think → Plan → Act → Verify loop with up to 20 iterations |
-| **19 Tools** | File I/O, directory ops, search, terminal, web requests, planning |
-| **Terminal Integration** | VS Code shell integration with ANSI cleaning, streaming output, auto shell detection |
-| **File Checkpoints** | SQLite-backed snapshots before every file modification with one-click undo |
-| **Diff Review** | Inline Accept/Reject buttons for proposed file changes in the chat UI |
-| **Permission System** | Per-tool Allow/Deny with persistent Always Allow/Always Deny decisions |
-| **Thinking Blocks** | Collapsible thought process cards with accumulated reasoning across iterations |
-| **Tool Cards** | Collapsible execution cards with status, args, and results inline in chat |
-| **History Restoration** | Full conversation history loaded from Qwen's API with tool call/result reconstruction |
-| **Custom Context** | Full conversation serialized into every request — own context management |
+|---|---|
+| **Autonomous Agent Loop** | Think → Plan → Act → Verify loop running up to 20 continuous iterations with verification checkpoints. |
+| **Qwen Wanx Image Gen** | Native visual artwork and diagram generation with dedicated isolated chat sessions and inline preview cards. |
+| **Multimodal Uploads** | Direct Alibaba Cloud OSS upload with STS tokens (`ali-oss`) for screenshots, images, and PDF documents. |
+| **20 Specialized Tools** | Complete file editing, search, terminal execution, workspace planning, and image generation. |
+| **Auto-Recovery & Stop** | Automatic recovery from `"The chat is in progress!"` states and stop signal propagation via `/chat/completions/stop`. |
+| **Markdown Protection** | Tokenized markdown rendering preventing URL mangling (e.g. `_` underscore corruption in image links). |
+| **Terminal Integration** | VS Code Shell Integration with ANSI filtering, streaming output, and Ctrl+C interrupt support. |
+| **File Checkpoints** | Automatic SQLite-backed snapshots before every file modification with one-click undo. |
+| **Diff Review** | Inline diff view with Accept/Reject buttons for code edits before applying to disk. |
+| **Permission Controls** | Per-tool Allow/Deny and persistent "Always Allow" decisions stored in global extension state. |
+| **Thinking Blocks** | Collapsible reasoning blocks displaying full Qwen 3.7 thought processes. |
 
-## 🛠️ Available Tools (19)
+---
 
-| Category | Tools |
-|----------|-------|
-| **File** | `read_file`, `write_file`, `edit_file`, `delete_file`, `patch_file` |
-| **Directory** | `create_folder`, `delete_folder`, `list_directory` |
-| **Search** | `search_files`, `find_in_files`, `list_symbols`, `get_file_info` |
-| **Terminal** | `run_terminal`, `terminal_input`, `stop_terminal` |
-| **Web** | `web_request` |
-| **Planning** | `create_plan`, `update_plan` |
-| **Utility** | `get_current_datetime` |
+## 🛠️ Available Tools (20)
 
-All tools accept multiple parameter name variants (e.g., `file_path`, `filepath`, `path`) for robustness.
+| Category | Tools | Description |
+|---|---|---|
+| **Creative / Vision** | `image_gen` | Generate images natively using Qwen's Wanx text-to-image AI engine |
+| **File Operations** | `read_file`, `write_file`, `edit_file`, `delete_file`, `patch_file` | Read, create, edit with diffs, delete, or multi-patch workspace files |
+| **Directory Operations** | `create_folder`, `delete_folder`, `list_directory` | Directory tree inspection, creation, and cleanup |
+| **Search & Discovery** | `search_files`, `find_in_files`, `list_symbols`, `get_file_info` | Fast file globbing, regex content search, AST symbol extraction |
+| **Terminal & Shell** | `run_terminal`, `terminal_input`, `stop_terminal` | Run bash/cmd/PowerShell commands, send interactive input, or Ctrl+C |
+| **Web & Networking** | `web_request` | Make HTTP requests to verify local dev servers and APIs |
+| **Task Planning** | `create_plan`, `update_plan` | Interactive todo checklist tracking step-by-step progress |
+| **Utilities** | `get_current_datetime` | System time inspection for date-sensitive development tasks |
 
-## 🔌 Authentication
+---
 
-Uses cookie-based authentication from `chat.qwen.ai`. Paste your browser cookie string (containing the `token=eyJ...` JWT) in the settings panel. The cookie is stored in VS Code's encrypted secrets storage.
+## 🎨 Image Generation & Vision Architecture
+
+### Qwen Wanx Image Generation (`image_gen`)
+When you ask CodeRun to generate images, diagrams, or visual mockups:
+1. **Isolated Session**: CodeRun creates a dedicated, independent chat session (`/api/v2/chats/new`) so the image task never conflicts with your active coding conversation.
+2. **Native Wanx Engine**: Calls Qwen's Wanx model and extracts the high-resolution output from `cdn.qwenlm.ai`.
+3. **Inline Interactive Previews**: The tool card in the sidebar expands to show the generated image immediately with click-to-view full-resolution capabilities in your browser.
+4. **Resilient Session Recovery**: If Qwen's backend reports `"The chat is in progress!"`, CodeRun automatically frees the lock via `/api/v2/chat/completions/stop` and seamlessly recovers.
+
+### Multimodal Vision & Document Analysis
+- Drag and drop or attach screenshots, wireframes, and PDFs directly in the chat panel.
+- The extension automatically signs temporary STS tokens and uploads the files to Alibaba Cloud OSS.
+- Qwen Vision models inspect the uploaded assets to diagnose UI bugs, extract design elements, or analyze logs.
+
+---
+
+## 🔌 Authentication & Setup
+
+1. **Get Cookie**: Open [chat.qwen.ai](https://chat.qwen.ai) in your browser and log in.
+2. Open DevTools (`F12`), go to the **Application** / **Storage** tab → **Cookies** → `https://chat.qwen.ai`.
+3. Copy the cookie string (containing `token=eyJ...`).
+4. In VS Code, open the CodeRun settings panel and paste your cookie. It is stored securely in VS Code's encrypted secrets storage.
+
+---
 
 ## 📁 Project Structure
 
 ```
 src/
-├── extension.js           ← VS Code activation, IPC bridge, auth, 30+ message types
-├── agentLoop.js           ← Core agent loop: stream → parse → execute → loop
-├── promptBuilder.js       ← System prompt assembly with workspace context
-├── providerQwen.js        ← Qwen Browser API client + context serialization
-├── providerManager.js     ← Returns Qwen provider
+├── extension.js           ← VS Code activation, IPC bridge, provider setup, stop signaling
+├── agentLoop.js           ← Core agent loop: stream → extract → execute → loop
+├── promptBuilder.js       ← System prompt assembly with workspace & file context
+├── providerQwen.js        ← Qwen Browser API, STS OSS uploads, Wanx image gen, recovery
+├── providerManager.js     ← Provider configuration & management
 │
-├── tools.js               ← 18 tool async generators (file, dir, terminal, search, etc.)
-├── toolDefinitions.js     ← JSON schemas for all tools
-├── toolRegistry.js        ← Name→impl mapping with alias resolution (bash, read, etc.)
-├── toolExecutor.js        ← Result formatting for LLM context
+├── tools.js               ← Tool implementations (file, dir, terminal, search, image_gen)
+├── toolDefinitions.js     ← JSON schemas and parameter definitions for all 20 tools
+├── toolRegistry.js        ← Name-to-implementation mapping with alias resolution
+├── toolExecutor.js        ← Result formatting for model context injection
 │
-├── terminalManager.js     ← VS Code Terminal API, shell integration, child_process fallback
+├── terminalManager.js     ← VS Code Terminal API, shell integration, PTY management
 ├── permissions.js         ← Permission system with persistent decisions
-├── diffManager.js         ← Diff patch storage, apply/reject
-├── checkpointManager.js   ← SQLite file snapshots for undo
+├── diffManager.js         ← Diff patch storage, apply/reject inspection
+├── checkpointManager.js   ← SQLite file snapshots for instant undo
 │
-├── projectKnowledge.js    ← SQLite knowledge base (sql.js)
-├── searchManager.js       ← Search abstraction (SQLite → filesystem fallback)
-├── contextManager.js      ← Intent classification, editor context
+├── projectKnowledge.js    ← SQLite knowledge base (sql.js WASM)
+├── searchManager.js       ← File and content search engine
+├── contextManager.js      ← Intent classification & editor context
 ├── planningManager.js     ← Plan creation and step tracking
-├── executionManager.js    ← Plan execution engine
-├── verificationManager.js ← Post-execution verification
+├── executionManager.js    ← Plan step runner
+├── verificationManager.js ← Post-execution verification engine
 ├── learningManager.js     ← Framework/convention detection
 ├── timelineManager.js     ← Chronological event log
 │
-├── ChatSpace.js/.css      ← Chat UI: tool cards, diff cards, terminal cards, thinking blocks
+├── ChatSpace.js/.css      ← Chat UI: tool cards, diff cards, image previews, thinking
 ├── Dashboard.js/.css      ← Sidebar, settings, conversation list
-├── MarkdownRenderer.js    ← Client-side markdown → HTML
+├── MarkdownRenderer.js    ← Tokenized markdown parser (preserves image URLs & code blocks)
 │
-├── constants.js           ← System prompt, event types, storage keys
-├── config.js              ← VS Code settings reader, API key management
-├── utils.js               ← Shared helpers
-├── events.js              ← Simple pub/sub event bus
-├── symbolParser.js        ← Multi-language symbol extractor (JS, TS, Python, Go, Rust, Java, etc.)
-├── memoryManager.js       ← Simple in-memory store
-├── mcpManager.js          ← MCP placeholder stub
-├── skillsManager.js       ← Skill prompt fragments
-├── workspaceContext.js    ← Workspace folder detection
-├── conversationStore.js   ← LocalStorage conversation CRUD
-├── settingsStore.js       ← LocalStorage settings persistence
-├── agent.js               ← Public agent API wrapper
-├── index.html             ← Standalone browser entry point
+├── constants.js           ← System prompt, tool guidelines, event types, storage keys
+├── config.js              ← VS Code configuration and credentials manager
+├── utils.js               ← Shared functional utilities (debounce, sleep, truncate)
+└── workspaceContext.js    ← Workspace folder detection and path normalization
 ```
+
+---
 
 ## 🚀 Quick Start
 
@@ -111,43 +132,44 @@ src/
 - [Node.js](https://nodejs.org) >= 18.x
 - [VS Code](https://code.visualstudio.com) >= 1.80.0
 
-### Debug
-1. Open the project in VS Code
-2. Press `F5` — the Extension Development Host window opens
-3. Paste your Qwen browser cookie in the login panel
+### Run in Debug Mode
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/nbsgr/qwen-coderun-agent.git
+   cd qwen-coderun-agent
+   npm install
+   ```
+2. Open the directory in VS Code.
+3. Press `F5` to launch the **Extension Development Host**.
+4. In the new window, open the sidebar and start chatting!
 
-### Package
+### Package Extension (.vsix)
 ```bash
-npm install -g @vscode/vsce
-vsce package
+npx @vscode/vsce package
+code --install-extension qwen-coderun-agent-1.2.0.vsix
 ```
+
+---
 
 ## 💻 Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Extension Host | VS Code Extension API (Node.js) |
-| Frontend | Vanilla JS + CSS (no framework) |
-| Database | SQLite via `sql.js` (WASM) |
-| LLM | Qwen 3.7 Max (browser API) |
-| Auth | Cookie-based (chat.qwen.ai JWT) |
-| Build | None — raw ES modules |
+|---|---|
+| **Extension Host** | VS Code Extension API (Node.js, strict functional JavaScript) |
+| **Frontend UI** | Vanilla JS + CSS (3-Tier Modular Webview Architecture) |
+| **Database** | SQLite via `sql.js` (WebAssembly) |
+| **LLM & Vision** | Qwen 3.7 Max, Qwen VL, Qwen Plus (`chat.qwen.ai`) |
+| **Image Generation** | Qwen Wanx Text-to-Image AI Engine |
+| **Storage / OSS** | Alibaba Cloud OSS via `ali-oss` with STS V4 signatures |
+| **Auth** | Encrypted JWT Session Credentials |
 
-This creates a `.vsix` file that can be installed via:
-```
-code --install-extension ai-agent-<version>.vsix
-```
+---
 
 ## 📦 Repository
 
-Find the source code on GitHub:
-- **Repo:** [github.com/nbsgr/qwen-coderun-agent](https://github.com/nbsgr/qwen-coderun-agent)
+- **Repository:** [github.com/nbsgr/qwen-coderun-agent](https://github.com/nbsgr/qwen-coderun-agent)
 - **Issues:** [github.com/nbsgr/qwen-coderun-agent/issues](https://github.com/nbsgr/qwen-coderun-agent/issues)
-- **Clone:** `git clone https://github.com/nbsgr/qwen-coderun-agent.git`
 
-## License
+## 📄 License
 
-MIT
-
-
-
+MIT © [Bala Siva Ganesh](https://github.com/nbsgr)
