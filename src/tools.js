@@ -298,7 +298,9 @@ async function* get_file_info(args, workspace) {
  */
 async function* run_terminal(args, workspace) {
   var command = args.command || '';
-  var timeout = args.timeout || 30;
+  var isInstallOrBuild = /npm\s+(i|install|ci|build)|yarn\s+(install|build)|pnpm\s+(i|install|build)|cargo\s+build|pip\s+install/i.test(command);
+  var defaultTimeout = isInstallOrBuild ? 120 : 30;
+  var timeout = args.timeout || defaultTimeout;
   var background = args.background || false;
 
   if (!command) {
@@ -659,6 +661,30 @@ async function* create_plan(args, workspace) {
   };
 }
 
+async function* image_gen(args, workspace) {
+  var prompt = args.prompt || args.description || '';
+  yield { type: 'action', action: 'image_gen', message: 'Generating image with Qwen Wanx: ' + prompt };
+  try {
+    var activeConfig = (typeof globalThis.qwenActiveConfig === 'object' && globalThis.qwenActiveConfig) ? globalThis.qwenActiveConfig : {};
+    var qwenProvider = await import('./providerQwen.js');
+    var result = await qwenProvider.images(activeConfig, prompt);
+    var imageUrl = (result && result.data && result.data[0] && result.data[0].url) || '';
+    if (!imageUrl) {
+      throw new Error('Qwen did not return an image URL.');
+    }
+    var imageMarkdown = '![' + (prompt || 'Generated Image') + '](' + imageUrl + ')';
+    yield {
+      type: 'tool_result',
+      tool: 'image_gen',
+      success: true,
+      image_url: imageUrl,
+      message: 'Image generated successfully with Qwen Wanx:\n\n' + imageMarkdown
+    };
+  } catch (e) {
+    yield { type: 'tool_result', tool: 'image_gen', success: false, message: 'Qwen Image Gen failed: ' + e.message };
+  }
+}
+
 // =====================================================
 // REGISTER ALL TOOLS
 // =====================================================
@@ -688,4 +714,5 @@ export function registerAllTools() {
   toolRegistry.register('find_in_files', find_in_files);
   toolRegistry.register('update_plan', update_plan);
   toolRegistry.register('create_plan', create_plan);
+  toolRegistry.register('image_gen', image_gen);
 }

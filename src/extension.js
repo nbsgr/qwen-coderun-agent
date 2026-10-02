@@ -20,6 +20,7 @@ import * as checkpointManager from './checkpointManager.js';
 import * as diffManager from './diffManager.js';
 import { PROVIDER_DEFAULTS } from './constants.js';
 import * as browserLoginManager from './browserLoginManager.js';
+import { cleanAndParseOpenAiJson, stopChat as qwenStopChat } from './providerQwen.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -102,6 +103,10 @@ export function activate(context) {
     }
   };
 
+  globalThis.qwenGetActiveCookie = function() {
+    return (context && context.globalState && context.globalState.get('qwen-coderun.fallbackCookie')) || '';
+  };
+
   // Register all tools
   registerAllTools();
 
@@ -164,7 +169,7 @@ export function activate(context) {
   );
 
   // Sidebar provider
-  var sidebarProvider = new SidebarWebviewViewProvider(context.extensionUri);
+  var sidebarProvider = createSidebarWebviewViewProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('qwen-coderun.chatView', sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true }
@@ -192,34 +197,30 @@ export function activate(context) {
   );
 }
 
-// =====================================================
-// SIDEBAR WEBVIEW PROVIDER
-// =====================================================
-class SidebarWebviewViewProvider {
-  constructor(extensionUri) {
-    this.extensionUri = extensionUri;
-  }
+function createSidebarWebviewViewProvider(extensionUri) {
+  return {
+    extensionUri: extensionUri,
+    resolveWebviewView: function(webviewView, context, token) {
+      console.log('[QWEN_CODERUN] resolveWebviewView called');
+      try {
+        fs.appendFileSync('D:/coderun-extension/debug_auth.log', '\n[EVENT] ' + new Date().toISOString() + ' - resolveWebviewView called\n');
+      } catch (_) {}
+      sidebarWebviewView = webviewView;
 
-  resolveWebviewView(webviewView, context, token) {
-    console.log('[QWEN_CODERUN] resolveWebviewView called');
-    try {
-      fs.appendFileSync('D:/coderun-extension/debug_auth.log', `\n[EVENT] ${new Date().toISOString()} - resolveWebviewView called\n`);
-    } catch (_) {}
-    sidebarWebviewView = webviewView;
+      webviewView.webview.options = {
+        enableScripts: true,
+        localResourceRoots: [vscode.Uri.file(path.join(extensionUri.fsPath, 'src'))]
+      };
 
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [vscode.Uri.file(path.join(this.extensionUri.fsPath, 'src'))]
-    };
+      webviewView.webview.html = getWebviewHtml(webviewView.webview, extensionUri);
 
-    webviewView.webview.html = getWebviewHtml(webviewView.webview, this.extensionUri);
+      webviewView.webview.onDidReceiveMessage(function(message) {
+        handleFrontendMessage(message, webviewView.webview);
+      });
 
-    webviewView.webview.onDidReceiveMessage(function(message) {
-      handleFrontendMessage(message, webviewView.webview);
-    });
-
-    currentWebview = webviewView.webview;
-  }
+      currentWebview = webviewView.webview;
+    }
+  };
 }
 
 // =====================================================
@@ -521,6 +522,337 @@ async function fetchQwenChatDetail(context, chatId) {
 }
 
 // =====================================================
+// QWEN CHAT HISTORY RECONSTRUCTION HELPERS
+// =====================================================
+function parseAssistantBlock(rawContent, thinkContent, toolIdxStart) {
+  var nextToolIdx = toolIdxStart || 0;
+  var parsed = cleanAndParseOpenAiJson(rawContent);
+
+  if (parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].message) {
+    var choiceMsg = parsed.choices[0].message;
+    var thinking = choiceMsg.reasoning || thinkContent || '';
+    var content = choiceMsg.content || '';
+    var rawCalls = choiceMsg.tool_calls || [];
+    var formattedCalls = [];
+
+    for (var i = 0; i < rawCalls.length; i++) {
+      var tc = rawCalls[i];
+      var fn = tc.function || tc;
+      var argsStr = '';
+      if (typeof fn.arguments === 'object') {
+        try {
+          argsStr = JSON.stringify(fn.arguments);
+        } catch (_) {
+          argsStr = String(fn.arguments || '');
+        }
+      } else {
+        argsStr = String(fn.arguments || '');
+      }
+      formattedCalls.push({
+        id: tc.id || ('hist_tc_' + nextToolIdx++),
+        type: 'function',
+        function: {
+          name: fn.name || '',
+          arguments: argsStr
+        }
+      });
+    }
+
+    var resEntry = {
+      role: 'assistant',
+      thinking: thinking,
+      content: content
+    };
+    if (formattedCalls.length) {
+      resEntry.tool_calls = formattedCalls;
+    }
+    return { entry: resEntry, nextToolIdx: nextToolIdx };
+  }
+
+  var calls = [];
+  var re = /```json\s*(\{[\s\S]*?\})\s*(?:```|$)/g;
+  var m;
+  while ((m = re.exec(rawContent)) !== null) {
+    try {
+      var obj = JSON.parse(m[1].trim());
+      if (obj && Array.isArray(obj.tool_calls)) {
+        for (var k = 0; k < obj.tool_calls.length; k++) {
+          var legTc = obj.tool_calls[k];
+          calls.push({
+            id: 'hist_tc_' + nextToolIdx++,
+            type: 'function',
+            function: {
+              name: legTc.name,
+              arguments: typeof legTc.arguments === 'object' ? JSON.stringify(legTc.arguments) : String(legTc.arguments || '')
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  var cleanContent = rawContent.replace(/```json\s*\{[\s\S]*?"tool_calls"[\s\S]*?\}\s*```/g, '').trim();
+  var fallbackEntry = {
+    role: 'assistant',
+    thinking: thinkContent || '',
+    content: cleanContent || (calls.length ? '' : rawContent)
+  };
+  if (calls.length) {
+    fallbackEntry.tool_calls = calls;
+  }
+  return { entry: fallbackEntry, nextToolIdx: nextToolIdx };
+}
+
+function parseAssistantMessage(msg, toolIdxStart) {
+  var thinkContent = '';
+  var answerContent = '';
+  var imageMarkdown = '';
+  if (msg.content_list && msg.content_list.length) {
+    for (var j = 0; j < msg.content_list.length; j++) {
+      var block = msg.content_list[j];
+      if (block.phase === 'think') {
+        thinkContent += (block.content || '');
+      } else if (block.phase === 'answer') {
+        answerContent += (block.content || '');
+      } else if (block.phase === 'image_gen_tool' && block.extra) {
+        var imgList = block.extra.image_list || block.extra.tool_result || [];
+        for (var k = 0; k < imgList.length; k++) {
+          var imgUrl = imgList[k] && (imgList[k].image || imgList[k].url);
+          if (imgUrl) {
+            imageMarkdown += '![Generated Image](' + imgUrl + ')\n\n';
+          }
+        }
+      }
+    }
+  }
+  if (!answerContent && !thinkContent) {
+    answerContent = msg.content || '';
+  }
+  if (imageMarkdown) {
+    answerContent = imageMarkdown + answerContent;
+  }
+
+  return parseAssistantBlock(answerContent, thinkContent, toolIdxStart);
+}
+
+function parseSerializedPrompt(text) {
+  var historyIdx = text.indexOf('--- CONVERSATION HISTORY ---');
+  var currentStepIdx = text.indexOf('--- CURRENT STEP ---');
+  var currentReqIdx = text.indexOf('--- CURRENT REQUEST ---');
+
+  if (historyIdx === -1 && currentStepIdx === -1 && currentReqIdx === -1) {
+    var legUserIdx = text.lastIndexOf('[User Request]:\n');
+    if (legUserIdx !== -1) {
+      return [{ role: 'user', content: text.substring(legUserIdx + '[User Request]:\n'.length).trim() }];
+    }
+    if (text.indexOf('[System tool execution result]:') === 0) {
+      return [{ role: 'tool', content: text.substring('[System tool execution result]:\n'.length).trim() }];
+    }
+    if (text.indexOf('You are an autonomous AI coding agent') !== -1) {
+      var lastUserMarker = text.lastIndexOf('\nUser:\n');
+      if (lastUserMarker !== -1) {
+        return [{ role: 'user', content: text.substring(lastUserMarker + '\nUser:\n'.length).trim() }];
+      }
+    }
+    return [{ role: 'user', content: text.trim() }];
+  }
+
+  var extractedMessages = [];
+  var historyText = '';
+
+  var endHistoryIdx = -1;
+  if (currentStepIdx !== -1 && currentReqIdx !== -1) {
+    endHistoryIdx = Math.min(currentStepIdx, currentReqIdx);
+  } else if (currentStepIdx !== -1) {
+    endHistoryIdx = currentStepIdx;
+  } else if (currentReqIdx !== -1) {
+    endHistoryIdx = currentReqIdx;
+  }
+
+  if (historyIdx !== -1) {
+    var rawHist = (endHistoryIdx !== -1)
+      ? text.substring(historyIdx + '--- CONVERSATION HISTORY ---'.length, endHistoryIdx)
+      : text.substring(historyIdx + '--- CONVERSATION HISTORY ---'.length);
+    historyText = rawHist.trim();
+  }
+
+  if (historyText) {
+    var itemRegex = /(?:^|\n)(User:\n|Assistant:\n|\[Tool Result for ([^\]]+)\]:\n)/g;
+    var matches = [];
+    var m;
+    while ((m = itemRegex.exec(historyText)) !== null) {
+      matches.push({
+        type: m[1].startsWith('User:') ? 'user' : (m[1].startsWith('Assistant:') ? 'assistant' : 'tool'),
+        header: m[2] || '',
+        startIndex: m.index,
+        contentStart: m.index + m[0].length
+      });
+    }
+
+    for (var i = 0; i < matches.length; i++) {
+      var cur = matches[i];
+      var nextStart = (i + 1 < matches.length) ? matches[i + 1].startIndex : historyText.length;
+      var chunk = historyText.substring(cur.contentStart, nextStart).trim();
+
+      if (cur.type === 'user') {
+        extractedMessages.push({ role: 'user', content: chunk });
+      } else if (cur.type === 'tool') {
+        var toolId = '';
+        var idMatch = cur.header.match(/ID:\s*([^\)]+)/);
+        if (idMatch) toolId = idMatch[1].trim();
+        extractedMessages.push({
+          role: 'tool',
+          tool_call_id: toolId,
+          content: chunk
+        });
+      } else if (cur.type === 'assistant') {
+        var reasoning = '';
+        var content = '';
+        var toolCalls = [];
+
+        var rIdx = chunk.indexOf('Reasoning:');
+        var tcIdx = chunk.indexOf('Tool Calls:');
+        var cIdx = chunk.indexOf('Content:');
+
+        var reasoningEnd = -1;
+        if (rIdx !== -1) {
+          if (tcIdx !== -1 && tcIdx > rIdx) reasoningEnd = tcIdx;
+          else if (cIdx !== -1 && cIdx > rIdx) reasoningEnd = cIdx;
+          else reasoningEnd = chunk.length;
+          reasoning = chunk.substring(rIdx + 'Reasoning:'.length, reasoningEnd).trim();
+        }
+
+        var tcEnd = -1;
+        if (tcIdx !== -1) {
+          if (cIdx !== -1 && cIdx > tcIdx) tcEnd = cIdx;
+          else tcEnd = chunk.length;
+          var tcRaw = chunk.substring(tcIdx + 'Tool Calls:'.length, tcEnd).trim();
+          try {
+            toolCalls = JSON.parse(tcRaw);
+          } catch (_) {}
+        }
+
+        if (cIdx !== -1) {
+          content = chunk.substring(cIdx + 'Content:'.length).trim();
+        } else if (rIdx === -1 && tcIdx === -1) {
+          content = chunk.trim();
+        }
+
+        var aMsg = {
+          role: 'assistant',
+          thinking: reasoning,
+          content: content
+        };
+        if (toolCalls && toolCalls.length) {
+          aMsg.tool_calls = toolCalls;
+        }
+        extractedMessages.push(aMsg);
+      }
+    }
+  }
+
+  if (currentStepIdx !== -1) {
+    var stepText = text.substring(currentStepIdx + '--- CURRENT STEP ---'.length).trim();
+    var toolHeaderMatch = stepText.match(/\[(?:Latest )?Tool Execution Result for ([^\]]+)\]:\n([\s\S]*?)(?:\n\nAnalyze this result|$)/);
+    if (toolHeaderMatch) {
+      var headerStr = toolHeaderMatch[1];
+      var stepToolContent = toolHeaderMatch[2].trim();
+      var stepToolId = '';
+      var sIdMatch = headerStr.match(/ID:\s*([^\)]+)/);
+      if (sIdMatch) stepToolId = sIdMatch[1].trim();
+
+      extractedMessages.push({
+        role: 'tool',
+        tool_call_id: stepToolId,
+        content: stepToolContent
+      });
+    }
+  } else if (currentReqIdx !== -1) {
+    var reqText = text.substring(currentReqIdx + '--- CURRENT REQUEST ---'.length).trim();
+    if (reqText.startsWith('User:\n')) {
+      reqText = reqText.substring('User:\n'.length).trim();
+    }
+    extractedMessages.push({
+      role: 'user',
+      content: reqText
+    });
+  }
+
+  return extractedMessages;
+}
+
+function parseQwenChatHistory(rawMessages) {
+  var formattedMessages = [];
+  var toolCallIdx = 0;
+
+  for (var i = 0; i < rawMessages.length; i++) {
+    var msg = rawMessages[i];
+    var role = msg.role;
+
+    if (role === 'user') {
+      var userContent = msg.content || '';
+      var unpacked = parseSerializedPrompt(userContent);
+
+      var attachedImages = [];
+      var attachedDocs = [];
+      if (msg.files && Array.isArray(msg.files)) {
+        for (var f = 0; f < msg.files.length; f++) {
+          var fileObj = msg.files[f];
+          var fileUrl = fileObj.url || (fileObj.file && fileObj.file.url) || '';
+          var isImg = fileObj.type === 'image' || fileObj.file_class === 'vision' || (fileObj.file_type && fileObj.file_type.startsWith('image/')) || (fileObj.name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fileObj.name));
+          if (isImg && fileUrl) {
+            attachedImages.push(fileUrl);
+          } else if (fileUrl || fileObj.name) {
+            attachedDocs.push({
+              name: fileObj.name || 'Document.pdf',
+              type: fileObj.file_type || 'application/pdf',
+              url: fileUrl,
+              isPdf: (fileObj.file_type === 'application/pdf') || (fileObj.name && fileObj.name.toLowerCase().endsWith('.pdf'))
+            });
+          }
+        }
+      }
+
+      var targetMsg = null;
+      if (rawMessages.length > 2 && formattedMessages.length > 0) {
+        if (unpacked.length > 1) {
+          targetMsg = unpacked[unpacked.length - 1];
+          formattedMessages.push(targetMsg);
+        } else if (unpacked.length === 1) {
+          targetMsg = unpacked[0];
+          formattedMessages.push(targetMsg);
+        }
+      } else {
+        for (var u = 0; u < unpacked.length; u++) {
+          formattedMessages.push(unpacked[u]);
+          if (unpacked[u].role === 'user') targetMsg = unpacked[u];
+        }
+      }
+
+      if (targetMsg && targetMsg.role === 'user') {
+        if (attachedImages.length > 0) {
+          targetMsg.image = attachedImages[0];
+          targetMsg.images = attachedImages;
+        }
+        if (attachedDocs.length > 0) {
+          targetMsg.attachment = attachedDocs[0];
+          targetMsg.attachments = attachedDocs;
+        }
+        if (msg.files && msg.files.length) {
+          targetMsg.files = msg.files;
+        }
+      }
+    } else if (role === 'assistant') {
+      var res = parseAssistantMessage(msg, toolCallIdx);
+      toolCallIdx = res.nextToolIdx;
+      formattedMessages.push(res.entry);
+    }
+  }
+
+  return formattedMessages;
+}
+
+// =====================================================
 // FRONTEND MESSAGE HANDLER
 // =====================================================
 async function handleFrontendMessage(message, webview) {
@@ -601,6 +933,7 @@ async function handleFrontendMessage(message, webview) {
     case 'startChat': {
       var userPrompt = message.message;
       var userImage = message.image || null;
+      var userAttachment = message.attachment || null;
       var history = message.history;
       var workspaceFolder = message.workspaceFolder;
       // Start with a fresh terminal only if this is the first message in a new chat session
@@ -693,7 +1026,8 @@ async function handleFrontendMessage(message, webview) {
 
       try {
         console.log('[EXTENSION] Calling runAgent...');
-        await runAgent(userPrompt, providerConfig.model, workspaceFolder, history, providerConfig, sendEvent, askPermission, { signal: abortCtrl, image: userImage });
+        globalThis.qwenActiveConfig = providerConfig;
+        await runAgent(userPrompt, providerConfig.model, workspaceFolder, history, providerConfig, sendEvent, askPermission, { signal: abortCtrl, image: userImage, attachment: userAttachment });
         console.log('[EXTENSION] runAgent completed');
         webview.postMessage({ type: 'agentEvent', event: { type: 'stream_end', stopped: abortCtrl.stopped } });
         
@@ -728,6 +1062,9 @@ async function handleFrontendMessage(message, webview) {
       }
       permissions.cancelAllPermissions();
       diffManager.cancelAll();
+      try {
+        qwenStopChat(globalThis.qwenActiveConfig);
+      } catch (_) {}
       break;
     }
 
@@ -827,6 +1164,15 @@ async function handleFrontendMessage(message, webview) {
 
     case 'openQwenLogin': {
       vscode.env.openExternal(vscode.Uri.parse('https://chat.qwen.ai/'));
+      break;
+    }
+
+    case 'openExternal': {
+      if (message.url) {
+        try {
+          vscode.env.openExternal(vscode.Uri.parse(message.url));
+        } catch (_) {}
+      }
       break;
     }
 
@@ -941,115 +1287,7 @@ async function handleFrontendMessage(message, webview) {
         var detailRes = await fetchQwenChatDetail(extensionContext, chatId);
         if (detailRes && detailRes.success && detailRes.messages) {
           var rawMessages = detailRes.messages;
-          // ── Helpers to reconstruct agent-style messages from flat Qwen history ──
-          // Qwen stores tool results as user messages with [System tool execution result]:
-          // and tool calls as ```json { tool_calls: [...] } blocks inside assistant text.
-          // We reconstruct our structured format so loadHistory renders them as cards.
-
-          function _parseToolCallsFromText(text, startIdx) {
-            if (!text) return null;
-            var idx = startIdx || 0;
-            var calls = [];
-            var re = /```json\s*(\{[\s\S]*?\})\s*(?:```|$)/g;
-            var m;
-            while ((m = re.exec(text)) !== null) {
-              try {
-                var obj = JSON.parse(m[1].trim());
-                if (obj && Array.isArray(obj.tool_calls)) {
-                  obj.tool_calls.forEach(function(tc) {
-                    calls.push({
-                      id: 'hist_tc_' + idx++,
-                      type: 'function',
-                      function: {
-                        name: tc.name,
-                        arguments: typeof tc.arguments === 'object'
-                          ? JSON.stringify(tc.arguments)
-                          : String(tc.arguments || '')
-                      }
-                    });
-                  });
-                }
-              } catch (_) {}
-            }
-            return calls.length ? calls : null;
-          }
-
-          function _stripToolCallBlocks(text) {
-            if (!text) return text;
-            return text.replace(/```json\s*\{[\s\S]*?"tool_calls"[\s\S]*?\}\s*```/g, '').trim();
-          }
-
-          var formattedMessages = [];
-          var toolCallIdx = 0;
-
-          for (var i = 0; i < rawMessages.length; i++) {
-            var msg = rawMessages[i];
-            var role = msg.role;
-
-            if (role === 'user') {
-              var userContent = msg.content || '';
-              var isToolResult = userContent.indexOf('[System tool execution result]:') === 0;
-
-              if (isToolResult) {
-                // Convert tool result user messages to 'tool' role so loadHistory
-                // groups them with the preceding assistant messages as botMessages.
-                var toolContent = userContent.substring('[System tool execution result]:\n'.length);
-                // Link to the LAST parsed tool call by sequential index
-                var tcId = 'hist_tc_' + (toolCallIdx - 1);
-                formattedMessages.push({
-                  role: 'tool',
-                  tool_call_id: tcId,
-                  content: toolContent.trim()
-                });
-              } else {
-                // Strip the prepended system prompt from real user messages.
-                var userReqIdx = userContent.lastIndexOf('[User Request]:\n');
-                if (userReqIdx !== -1) {
-                  userContent = userContent.substring(userReqIdx + '[User Request]:\n'.length);
-                }
-                formattedMessages.push({
-                  role: 'user',
-                  content: userContent
-                });
-              }
-            } else if (role === 'assistant') {
-              var contentList = msg.content_list || [];
-              var thinkContent = '';
-              var answerContent = '';
-              for (var j = 0; j < contentList.length; j++) {
-                var block = contentList[j];
-                var phase = block.phase;
-                if (phase === 'think') {
-                  thinkContent += block.content || '';
-                } else if (phase === 'answer') {
-                  answerContent += block.content || '';
-                }
-              }
-              if (!answerContent && !thinkContent) {
-                answerContent = msg.content || '';
-              }
-
-              // Parse ```json { tool_calls } blocks from assistant text
-              var parsedCalls = _parseToolCallsFromText(answerContent, toolCallIdx);
-              if (parsedCalls && parsedCalls.length) {
-                toolCallIdx += parsedCalls.length;
-              }
-
-              // Strip raw JSON tool call blocks from displayed content
-              var cleanContent = _stripToolCallBlocks(answerContent);
-
-              var entry = {
-                role: 'assistant',
-                thinking: thinkContent,
-                content: cleanContent || (parsedCalls && parsedCalls.length ? '' : answerContent)
-              };
-              if (parsedCalls && parsedCalls.length) {
-                entry.tool_calls = parsedCalls;
-              }
-              formattedMessages.push(entry);
-            }
-          }
-
+          var formattedMessages = parseQwenChatHistory(rawMessages);
           webview.postMessage({ type: 'qwenChatDetail', success: true, chatId: chatId, messages: formattedMessages });
         } else {
           var isAuthDetail = detailRes && detailRes.isAuthError;
@@ -1299,13 +1537,10 @@ async function handleFrontendMessage(message, webview) {
 async function checkProviderHealth(webview, overrideConfig) {
   var cfg = overrideConfig;
   if (!cfg) {
-    var activeProvider = extensionContext?.globalState.get('qwen-coderun_selected_provider', '') || '';
-    if (activeProvider) {
-      cfg = await config.getProviderConfigByName(extensionContext, activeProvider);
-    } else {
-      cfg = await config.getProviderConfigWithKey(extensionContext);
-    }
+    cfg = await config.getProviderConfigWithKey(extensionContext);
   }
+  cfg.provider = 'qwen';
+  if (!cfg.baseUrl) cfg.baseUrl = 'https://chat.qwen.ai/api/v2';
   console.log('[QWEN_CODERUN] Checking health for provider:', cfg.provider, 'at', cfg.baseUrl, 'model:', cfg.model);
 
   if (!cfg.baseUrl) {
@@ -1316,7 +1551,7 @@ async function checkProviderHealth(webview, overrideConfig) {
       webview.postMessage({
         type: 'healthStatus',
         online: false,
-        provider: cfg.provider || 'none',
+        provider: 'qwen',
         error: 'No base URL configured. Please set it in settings.'
       });
     }
@@ -1331,7 +1566,7 @@ async function checkProviderHealth(webview, overrideConfig) {
       webview.postMessage({
         type: 'healthStatus',
         online: false,
-        provider: cfg.provider || 'none',
+        provider: 'qwen',
         error: 'API key required. Please enter your API key in settings and click Save.',
         models: []
       });
@@ -1350,7 +1585,7 @@ async function checkProviderHealth(webview, overrideConfig) {
       webview.postMessage({
         type: 'healthStatus',
         online: true,
-        provider: cfg.provider,
+        provider: 'qwen',
         models: models
       });
     }
@@ -1364,7 +1599,7 @@ async function checkProviderHealth(webview, overrideConfig) {
       webview.postMessage({
         type: 'healthStatus',
         online: false,
-        provider: cfg.provider,
+        provider: 'qwen',
         error: err.message,
         models: []
       });
@@ -1373,25 +1608,12 @@ async function checkProviderHealth(webview, overrideConfig) {
 }
 
 /**
- * Refresh models from ALL saved provider configurations.
- * Iterates over every saved provider and sends individual health status
- * messages so the frontend accumulates all models in the dropdown.
+ * Refresh models for the dedicated Qwen provider.
  */
 async function refreshAllProviderModels(webview) {
-  var allConfigs = config.getAllProviderConfigs(extensionContext);
-  var providerKeys = Object.keys(allConfigs);
-
-  if (!providerKeys.length) {
-    // No saved configs — fall back to the active provider
-    await checkProviderHealth(webview);
-    return;
-  }
-
-  for (var i = 0; i < providerKeys.length; i++) {
-    var provName = providerKeys[i];
-    var provCfg = await config.getProviderConfigByName(extensionContext, provName);
-    await checkProviderHealth(webview, provCfg);
-  }
+  var provCfg = await config.getProviderConfigWithKey(extensionContext);
+  provCfg.provider = 'qwen';
+  await checkProviderHealth(webview, provCfg);
 }
 
 // =====================================================

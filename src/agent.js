@@ -16,6 +16,8 @@ export async function runAgent(message, model, workspace, history, config, sendE
     sendEvent: sendEvent,
     askPermission: askPermission,
     signal: signal,
-    images: options.image ? [options.image] : (options.images || [])
+    images: options.image ? [options.image] : (options.images || []),
+    attachment: options.attachment || null,
+    attachments: options.attachments || (options.attachment ? [options.attachment] : [])
   });
 }

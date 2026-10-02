@@ -104,14 +104,20 @@
     if (!raw) return '';
     bindCopyHandler();
     var t = String(raw);
-    t = esc(t);
 
-    // Fenced code blocks
+    var tokens = [];
+    function saveToken(html) {
+      var id = '###MDRTOKEN' + tokens.length + '###';
+      tokens.push(html);
+      return id;
+    }
+
+    // 1. Fenced code blocks (extract before escaping)
     t = t.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
       var cls = lang ? ' language-' + lang : '';
       var label = lang ? '<span class="md-code-lang">' + esc(lang) + '</span>' : '';
       var highlighted = highlightCode(code.replace(/\n$/, ''), lang);
-      return (
+      return saveToken(
         '<div class="md-code-wrap">' +
           '<div class="md-code-header">' + label +
             '<button class="md-copy-btn" title="Copy">' + COPY_SVG + '</button>' +
@@ -121,10 +127,28 @@
       );
     });
 
-    // Inline code
-    t = t.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+    // 2. Inline code (extract before escaping/formatting)
+    t = t.replace(/`([^`\n]+)`/g, function (_, code) {
+      return saveToken('<code class="md-inline-code">' + esc(code) + '</code>');
+    });
 
-    // Bold + italic
+    // 3. Images: ![alt](src) (extract before inline formatting so URLs with _ or & are never corrupted)
+    t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, src) {
+      var cleanSrc = src.trim();
+      var cleanAlt = alt || 'Generated Image';
+      return saveToken('<img class="md-img" alt="' + esc(cleanAlt) + '" src="' + cleanSrc + '" loading="lazy" referrerpolicy="no-referrer"/>');
+    });
+
+    // 4. Links: [text](href) (extract before inline formatting)
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, href) {
+      var cleanHref = href.trim();
+      return saveToken('<a class="md-link" href="' + cleanHref + '" target="_blank" rel="noopener">' + esc(text) + '</a>');
+    });
+
+    // 5. HTML Escape remaining text
+    t = esc(t);
+
+    // 6. Bold + italic
     t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     t = t.replace(/\*(.+?)\*/g, '<em>$1</em>');
@@ -164,37 +188,41 @@
       return html;
     });
 
-    // Unordered list
-    t = t.replace(/(^[-*+] .+\n?)+/gm, function (block) {
+    // Unordered list (supports -, *, +, • and optional indent)
+    t = t.replace(/(^[ \t]*[-*+•] .+\n?)+/gm, function (block) {
       var items = block.trim().split('\n').map(function (l) {
-        return '<li class="md-li">' + l.replace(/^[-*+] /, '') + '</li>';
+        return '<li class="md-li">' + l.replace(/^[ \t]*[-*+•] /, '') + '</li>';
       }).join('');
-      return '<ul class="md-ul">' + items + '</ul>\n';
+      return '\n<ul class="md-ul">' + items + '</ul>\n';
     });
 
-    // Ordered list
-    t = t.replace(/(^\d+\. .+\n?)+/gm, function (block) {
+    // Ordered list (supports optional indent)
+    t = t.replace(/(^[ \t]*\d+\. .+\n?)+/gm, function (block) {
       var items = block.trim().split('\n').map(function (l) {
-        return '<li class="md-li">' + l.replace(/^\d+\. /, '') + '</li>';
+        return '<li class="md-li">' + l.replace(/^[ \t]*\d+\. /, '') + '</li>';
       }).join('');
-      return '<ol class="md-ol">' + items + '</ol>\n';
+      return '\n<ol class="md-ol">' + items + '</ol>\n';
     });
 
-    // Images
-    t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img class="md-img" alt="$1" src="$2"/>');
-
-    // Links
-    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>');
+    // Ensure block elements are separated
+    t = t.replace(/(<\/(?:div|ul|ol|pre|blockquote|table|h[1-6])>)/gi, '$1\n\n');
+    t = t.replace(/(<(?:div|ul|ol|pre|blockquote|table|h[1-6])[^>]*>)/gi, '\n\n$1');
 
     // Paragraphs
-    var blockRe = /^<(div|ul|ol|h[1-6]|pre|blockquote|hr|img|table)/;
+    var blockRe = /^<(div|ul|ol|h[1-6]|pre|blockquote|hr|table|img|a)/i;
+    var tokenRe = /^###MDRTOKEN\d+###$/;
     var sections = t.split(/\n{2,}/);
     t = sections.map(function (sec) {
       sec = sec.trim();
       if (!sec) return '';
-      if (blockRe.test(sec)) return sec;
+      if (blockRe.test(sec) || tokenRe.test(sec)) return sec;
       return '<p class="md-p">' + sec.replace(/\n/g, '<br>') + '</p>';
     }).filter(Boolean).join('\n');
+
+    // 7. Restore all protected tokens (images, links, code blocks)
+    for (var tk = 0; tk < tokens.length; tk++) {
+      t = t.replace('###MDRTOKEN' + tk + '###', tokens[tk]);
+    }
 
     return t;
   }

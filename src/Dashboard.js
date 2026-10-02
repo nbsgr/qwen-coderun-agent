@@ -29,7 +29,7 @@
     modelsByProvider: {},
     isVsCode: !!window.VSCODE,
     baseUrl: DEFAULT_BASE_URL,
-    provider: "ollama",
+    provider: "qwen",
     isOnline: false,
     apiKey: "",
     hasApiKey: false,
@@ -39,7 +39,7 @@
     // after every change. ChatSpace can read it via getDashboardAlwaysDecisions.
     alwaysDecisions: {},
     settings: {
-      provider: "ollama",
+      provider: "qwen",
       baseUrl: DEFAULT_BASE_URL,
       apiKey: "",
       model: "",
@@ -738,13 +738,27 @@
     var text = document.getElementById("status-text");
     if (dot) dot.className = "cr-status-dot";
     if (text) text.textContent = "Online";
-    state.models = ['qwen3.7-max', 'qwen-plus', 'qwen-turbo'];
-    state.modelsByProvider = { qwen: state.models };
-    renderModelOptions();
+    if (!state.models || !state.models.length) {
+      state.models = [
+        'qwen3.7-plus',
+        'qwen3.8-max',
+        'qwen3.8-omni-flash',
+        'qwen3.7-max',
+        'qwen3.6-plus',
+        'qwen3.5-plus',
+        'qwen3.5-omni-plus'
+      ];
+      state.modelsByProvider = { qwen: state.models };
+      renderModelOptions();
+    }
   }
 
   function loadModels() {
-    checkHealth();
+    if (state.isVsCode && window.VSCODE_API) {
+      window.VSCODE_API.postMessage({ type: 'refreshAllModels' });
+    } else {
+      checkHealth();
+    }
   }
 
   function renderModelOptions() {
@@ -812,7 +826,10 @@
     if (!select || !state.selectedModel) return;
 
     if (!optionExists(select, state.selectedModel)) {
-      var provider = state.selectedProvider || 'ollama';
+      if (select.options.length === 1 && !select.options[0].value) {
+        select.innerHTML = "";
+      }
+      var provider = state.selectedProvider || 'qwen';
       
       var displayLabel = provider;
       if (provider.startsWith('compatible:')) {
@@ -1067,6 +1084,9 @@
     if (extra.sources) message.sources = extra.sources;
     if (extra.image) message.image = extra.image;
     if (extra.images) message.images = extra.images;
+    if (extra.attachment) message.attachment = extra.attachment;
+    if (extra.attachments) message.attachments = extra.attachments;
+    if (extra.files) message.files = extra.files;
     if (extra.tool_calls) message.tool_calls = extra.tool_calls;
     if (extra.tool_call_id) message.tool_call_id = extra.tool_call_id;
     if (extra.tool_name) message.tool_name = extra.tool_name;
@@ -1077,6 +1097,11 @@
       if (content) last.content = content;
       if (message.thinking) last.thinking = message.thinking;
       if (message.sources) last.sources = message.sources;
+      if (message.image) last.image = message.image;
+      if (message.images) last.images = message.images;
+      if (message.attachment) last.attachment = message.attachment;
+      if (message.attachments) last.attachments = message.attachments;
+      if (message.files) last.files = message.files;
       if (message.tool_calls) last.tool_calls = message.tool_calls;
       if (message.tool_name) last.tool_name = message.tool_name;
       if (message.result) last.result = message.result;
@@ -1275,6 +1300,20 @@
     }
     if (message.type === "permissionState") {
       state.alwaysDecisions = message.decisions || {};
+    }
+    if (message.type === "healthStatus") {
+      state.isOnline = !!message.online;
+      var dot = document.getElementById("status-dot");
+      var text = document.getElementById("status-text");
+      if (dot) dot.className = message.online ? "cr-status-dot" : "cr-status-dot cr-status-offline";
+      if (text) text.textContent = message.online ? "Online" : "Offline";
+      if (message.models && message.models.length) {
+        var pName = message.provider || 'qwen';
+        if (!state.modelsByProvider) state.modelsByProvider = {};
+        state.modelsByProvider[pName] = message.models;
+        state.models = message.models;
+        renderModelOptions();
+      }
     }
   });
 

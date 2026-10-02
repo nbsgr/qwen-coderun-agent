@@ -427,40 +427,58 @@ async function continueReadingInBackground(execId, reader, execution, shellName,
 // Returns { interactive: bool, promptDetected: bool }.
 function detectPrompt(text) {
   if (!text) return { interactive: false, promptDetected: false };
-  var lines = text.split('\n');
+  var allLines = text.split(/\r?\n/);
+  var nonBlankLines = [];
+  for (var i = 0; i < allLines.length; i++) {
+    var trimmed = allLines[i].trim();
+    if (trimmed.length > 0) {
+      nonBlankLines.push(trimmed);
+    }
+  }
+  if (nonBlankLines.length === 0) {
+    return { interactive: false, promptDetected: false };
+  }
+
+  // An active prompt waiting for user input is ALWAYS in the tail of the output
+  var tailLines = nonBlankLines.slice(-5);
   var interactive = false;
   var promptDetected = false;
 
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim();
+  for (var j = 0; j < tailLines.length; j++) {
+    var line = tailLines[j];
 
-    // Radio/checkbox menu characters (npm create vite, etc.)
+    // Radio/checkbox menu characters (npm create vite, inquirer, etc.)
     if (/[○●◉◎⦿⊙⊚]/.test(line)) {
       interactive = true;
       promptDetected = true;
     }
 
-    // Arrow key navigation hints (↑/↓)
-    if (/[↑↓←→]/.test(line)) {
+    // Arrow key navigation hints or selection cursors
+    if (/[↑↓←→]/.test(line) || /\b(arrow keys|use arrow keys|arrow-keys|to submit|to navigate)\b/i.test(line)) {
+      interactive = true;
+      promptDetected = true;
+    }
+    if (/[❯›]\s+\S+/.test(line)) {
       interactive = true;
       promptDetected = true;
     }
 
-    // Lines that end with colon — typical prompt form (e.g. "Select framework:")
-    if (/[:：]\s*$/.test(line) && line.length < 120) {
-      interactive = true;
-      promptDetected = true;
-    }
-
-    // (y/N) (Y/n) (Y/N) [y/N] patterns
-    if (/\([yYnN]\/[yYnN]\)|\[[yYnN]\/[yYnN]\]/.test(line)) {
+    // (y/N) (Y/n) (Y/N) [y/N] [Y/n] (yes/no) patterns
+    if (/\([yYnN]\/[yYnN]\)|\[[yYnN]\/[yYnN]\]|\b(yes\/no|y\/n)\b/i.test(line)) {
       interactive = true;
       promptDetected = true;
     }
 
     // Bracketed choice: [1] [2] [3] or (1) (2) (3)
-    if (/\[ ?\d+ ?\]|\( ?\d+ ?\)/.test(line) && lines.length - i < 30) {
+    if (/\[ ?\d+ ?\]|\( ?\d+ ?\)/.test(line)) {
       interactive = true;
+      promptDetected = true;
+    }
+
+    // Direct action prompts
+    if (/\b(press any key|press enter|hit enter|enter passphrase|enter password)\b/i.test(line)) {
+      interactive = true;
+      promptDetected = true;
     }
 
     // "Select", "Choose", "Pick" at line start
@@ -469,10 +487,29 @@ function detectPrompt(text) {
       promptDetected = true;
     }
 
-    // Line ends with "?" — direct question prompt
-    if (/\?\s*$/.test(line) && line.length < 150) {
+    // Line ends with "?" or starts with "? " — direct question prompt
+    if (/\?\s*$/.test(line) || /^\?\s+/.test(line)) {
       interactive = true;
       promptDetected = true;
+    }
+
+    // Colon check — only valid if NOT a compiler, log, URL, stack trace, or package manager message
+    if (/[:：]\s*$/.test(line) && line.length < 120) {
+      var isLogLine = /^(npm|yarn|pnpm|bun)\s+(warn|notice|info|error|err|http)\b/i.test(line) ||
+                      /^(warning|error|info|debug|notice|note|trace|exception)\b/i.test(line) ||
+                      /^\s*at\s+[\w\.]+/i.test(line) ||
+                      /^(https?|ftp|file):\/\//i.test(line) ||
+                      /\.[a-zA-Z0-9]+:\d+/i.test(line) ||
+                      /\b(allowScripts|audit|audited|added|packages|vulnerabilities)\b/i.test(line);
+
+      if (!isLogLine) {
+        // Must contain prompt-like keywords to be considered an input prompt
+        if (/\b(project|name|directory|target|destination|package|framework|variant|template|password|passphrase|username|choice|selection|author|version|license|description)\b/i.test(line) ||
+            /^(enter|select|choose|input|type)\b/i.test(line)) {
+          interactive = true;
+          promptDetected = true;
+        }
+      }
     }
   }
 
@@ -583,34 +620,47 @@ export async function executeCommand(command, timeout, background) {
       var reader = iterable[Symbol.asyncIterator]();
       var chunkCount = 0;
       var idleDetected = false;
+      var activeNextPromise = null;
 
       try {
-        var IDLE_TIMEOUT_MS = 3000;
+        var IDLE_TIMEOUT_MS = 5000;
 
         while (true) {
-          // Race between next chunk from the process and an idle timeout.
-          // If no output arrives within IDLE_TIMEOUT_MS, the process is
-          // likely waiting for stdin (interactive prompt).
-          var nextPromise = reader.next();
+          if (!activeNextPromise) {
+            activeNextPromise = reader.next();
+          }
           var timeoutId = null;
           var raceResult = await Promise.race([
-            nextPromise.then(function(r) {
+            activeNextPromise.then(function(r) {
               if (timeoutId) clearTimeout(timeoutId);
               timeoutId = null;
               return r;
             }),
             new Promise(function(resolve) {
               timeoutId = setTimeout(function() {
-                resolve({ done: true, value: undefined, _idleTimeout: true });
+                resolve({ done: false, value: undefined, _idleTimeout: true });
               }, IDLE_TIMEOUT_MS);
             })
           ]);
 
-          // If idle timeout fired, the process is waiting for input
+          // If idle timeout fired, verify if an interactive prompt is genuinely present
           if (raceResult._idleTimeout) {
-            idleDetected = true;
-            break;
+            var promptCheck = detectPrompt(stdout);
+            if (promptCheck.promptDetected) {
+              console.log('[TERMINAL] Idle timeout and interactive prompt detected for', execId);
+              idleDetected = true;
+              break;
+            }
+            // No interactive prompt detected — command is working silently (e.g. npm install, build)
+            if (Date.now() > timeoutAt) {
+              throw new Error('Command timed out after ' + timeout + ' seconds.');
+            }
+            // activeNextPromise is still pending and retained; loop continues waiting
+            continue;
           }
+
+          // A chunk arrived or stream ended — clear activeNextPromise so next iteration fetches next chunk
+          activeNextPromise = null;
 
           // Stream ended normally (process exited)
           if (raceResult.done) break;
@@ -654,11 +704,7 @@ export async function executeCommand(command, timeout, background) {
         // Fire-and-forget: keep reading the stream in the background so that
         // output produced by subsequent terminal_input calls is captured into
         // _lastSessionOutput and forwarded to the chat UI as terminal_output events.
-        // IMPORTANT: pass the orphaned nextPromise from the main loop — it was
-        // created by reader.next() but never awaited because the idle timeout won
-        // the race. If we don't process it first, the first chunk after
-        // terminal_input is consumed by the orphaned promise and lost.
-        continueReadingInBackground(execId, reader, execution, shellName, platformName, cwd, command, startedAt, nextPromise);
+        continueReadingInBackground(execId, reader, execution, shellName, platformName, cwd, command, startedAt, activeNextPromise);
 
         if (sendEventCallback) {
           sendEventCallback({

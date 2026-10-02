@@ -29,14 +29,20 @@ export function formatTime(ts) {
 }
 
 export function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
 }
 
 export function debounce(fn, ms) {
   var timer;
-  return function(...args) {
+  return function() {
+    var self = this;
+    var args = arguments;
     clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), ms);
+    timer = setTimeout(function() {
+      fn.apply(self, args);
+    }, ms);
   };
 }
 

@@ -94,10 +94,11 @@
 
   // ── RAF-coalesced smooth scroll (avoids layout thrashing) ───
   var _scrollRAF = null;
-  function scrollBottomSmooth(el) {
+  function scrollBottomSmooth(el, force) {
     if (!el) return;
     var hasPendingPermissions = el.querySelector('.cr-permission-actions button') !== null;
     if (hasPendingPermissions) return;
+    if (!force && el._userScrolledUp) return;
     if (_scrollRAF) return;
     _scrollRAF = requestAnimationFrame(function() {
       _scrollRAF = null;
@@ -113,8 +114,11 @@
       _renderTimer = null;
       if (S.contentDiv && S.contentText !== undefined) {
         S.contentDiv.innerHTML = md(S.contentText);
+        if (S.msgList && !S.msgList._userScrolledUp) {
+          scrollBottomSmooth(S.msgList);
+        }
       }
-    }, 100);
+    }, 60);
   }
   function flushContentRender(S) {
     if (_renderTimer) {
@@ -123,6 +127,9 @@
     }
     if (S.contentDiv && S.contentText !== undefined) {
       S.contentDiv.innerHTML = md(S.contentText);
+      if (S.msgList && !S.msgList._userScrolledUp) {
+        scrollBottom(S.msgList);
+      }
     }
   }
 
@@ -173,6 +180,8 @@
       var fileInput  = container.querySelector('.cr-file-input');
       var previewBox = container.querySelector('.cr-img-preview');
       var previewImg = container.querySelector('.cr-preview-img');
+      var previewDoc = container.querySelector('.cr-preview-doc');
+      var previewDocName = container.querySelector('.cr-preview-doc-name');
       var clearImg   = container.querySelector('.cr-clear-img-btn');
       var charCount  = container.querySelector('.cr-char-count');
       var stopBtn    = container.querySelector('.cr-stop-btn');
@@ -180,10 +189,13 @@
       var controlsPanel = container.querySelector('.cr-agent-controls-panel');
 
       var pendingImage = null;
+      var pendingAttachment = null;
       var abortCtrl = null;
 
       var S = {
         isStreaming: false,
+        msgList: msgList,
+        _userScrolledUp: false,
         botBody: null,
         thinkBlock: null,
         thinkPre: null,
@@ -213,6 +225,29 @@
         _seenToolIds: {},  // Tracks tool call IDs to prevent duplicate cards
         timeline: null
       };
+
+      if (msgList) {
+        msgList._userScrolledUp = false;
+        msgList.addEventListener('scroll', function() {
+          var threshold = 80;
+          var distFromBottom = msgList.scrollHeight - (msgList.scrollTop + msgList.clientHeight);
+          msgList._userScrolledUp = distFromBottom > threshold;
+          if (S) S._userScrolledUp = msgList._userScrolledUp;
+        });
+
+        msgList.addEventListener('click', function(e) {
+          var target = e.target;
+          if (target && target.tagName === 'IMG' && target.classList.contains('md-img') && target.src) {
+            e.stopPropagation();
+            if (window.VSCODE_API) {
+              window.VSCODE_API.postMessage({
+                type: 'openExternal',
+                url: target.src
+              });
+            }
+          }
+        });
+      }
 
       function clearStatusLines(S) {
         if (S.statusLines && S.statusLines.length) {
@@ -430,7 +465,41 @@
 
         turns.forEach(function(turn) {
           if (turn.user) {
-            appendUserBubble(msgList, turn.user.content, turn.user.image || (turn.user.images ? turn.user.images[0] : null));
+            var userImgs = [];
+            if (turn.user.images && Array.isArray(turn.user.images)) {
+              userImgs = turn.user.images;
+            } else if (turn.user.image) {
+              userImgs = [turn.user.image];
+            } else if (turn.user.files && Array.isArray(turn.user.files)) {
+              for (var f = 0; f < turn.user.files.length; f++) {
+                var fileObj = turn.user.files[f];
+                var fUrl = fileObj.url || (fileObj.file && fileObj.file.url) || '';
+                var isImg = fileObj.type === 'image' || fileObj.file_class === 'vision' || (fileObj.file_type && fileObj.file_type.startsWith('image/')) || (fileObj.name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fileObj.name));
+                if (isImg && fUrl) {
+                  userImgs.push(fUrl);
+                }
+              }
+            }
+
+            var userAtt = turn.user.attachment || (turn.user.attachments ? turn.user.attachments[0] : null);
+            if (!userAtt && turn.user.files && Array.isArray(turn.user.files)) {
+              for (var f2 = 0; f2 < turn.user.files.length; f2++) {
+                var fileObj2 = turn.user.files[f2];
+                var fUrl2 = fileObj2.url || (fileObj2.file && fileObj2.file.url) || '';
+                var isDoc = (fileObj2.file_type === 'application/pdf') || (fileObj2.name && fileObj2.name.toLowerCase().endsWith('.pdf'));
+                if (isDoc) {
+                  userAtt = {
+                    name: fileObj2.name || 'Document.pdf',
+                    type: fileObj2.file_type || 'application/pdf',
+                    url: fUrl2,
+                    isPdf: true
+                  };
+                  break;
+                }
+              }
+            }
+
+            appendUserBubble(msgList, turn.user.content, userImgs.length > 0 ? userImgs : null, userAtt);
           }
 
           if (turn.botMessages && turn.botMessages.length) {
@@ -508,7 +577,13 @@
           }
         });
 
-        scrollBottom(msgList);
+        if (msgList) {
+          msgList._userScrolledUp = false;
+          scrollBottom(msgList);
+          setTimeout(function() {
+            scrollBottom(msgList);
+          }, 100);
+        }
       }
 
       if (conversation.plan) {
@@ -552,6 +627,14 @@
         onStreamEnd();
       };
 
+      function clearAttachment() {
+        pendingImage = null;
+        pendingAttachment = null;
+        if (previewImg) { previewImg.src = ''; previewImg.style.display = 'none'; }
+        if (previewDoc) { previewDoc.style.display = 'none'; }
+        if (previewBox) { previewBox.style.display = 'none'; }
+      }
+
       input.addEventListener('paste', function(e) {
         var items = (e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData)) ? (e.clipboardData || e.originalEvent.clipboardData).items : null;
         if (!items) return;
@@ -562,8 +645,19 @@
             if (!blob) continue;
             var reader = new FileReader();
             reader.onload = function(ev) {
-              pendingImage = ev.target.result.replace(/^data:[^;]+;base64,/, '');
-              if (previewImg) previewImg.src = ev.target.result;
+              var rawB64 = ev.target.result.replace(/^data:[^;]+;base64,/, '');
+              pendingImage = rawB64;
+              pendingAttachment = {
+                name: 'pasted_image.png',
+                type: 'image/png',
+                size: blob.size,
+                data: rawB64
+              };
+              if (previewDoc) previewDoc.style.display = 'none';
+              if (previewImg) {
+                previewImg.src = ev.target.result;
+                previewImg.style.display = 'block';
+              }
               if (previewBox) previewBox.style.display = 'flex';
             };
             reader.readAsDataURL(blob);
@@ -578,24 +672,44 @@
         if (!f) return;
         var reader = new FileReader();
         reader.onload = function(ev) {
-          pendingImage = ev.target.result.replace(/^data:[^;]+;base64,/, '');
-          if (previewImg) previewImg.src = ev.target.result;
+          var rawB64 = ev.target.result.replace(/^data:[^;]+;base64,/, '');
+          var isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+          var isImg = f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name);
+          pendingAttachment = {
+            name: f.name,
+            type: f.type || (isPdf ? 'application/pdf' : 'image/png'),
+            size: f.size,
+            data: rawB64,
+            isPdf: isPdf
+          };
+          if (isImg) {
+            pendingImage = rawB64;
+            if (previewDoc) previewDoc.style.display = 'none';
+            if (previewImg) {
+              previewImg.src = ev.target.result;
+              previewImg.style.display = 'block';
+            }
+          } else {
+            pendingImage = null;
+            if (previewImg) previewImg.style.display = 'none';
+            if (previewDoc) {
+              if (previewDocName) previewDocName.textContent = f.name;
+              previewDoc.style.display = 'flex';
+            }
+          }
           if (previewBox) previewBox.style.display = 'flex';
         };
         reader.readAsDataURL(f);
         fileInput.value = '';
       });
       if (clearImg) {
-        clearImg.addEventListener('click', function() {
-          pendingImage = null;
-          if (previewBox) previewBox.style.display = 'none';
-        });
+        clearImg.addEventListener('click', clearAttachment);
       }
 
       function doSend() {
         try {
           var text = input.value.trim();
-          if ((!text && !pendingImage) || S.isStreaming) return;
+          if ((!text && !pendingImage && !pendingAttachment) || S.isStreaming) return;
 
           var currentModel = (window.getDashboardModel ? window.getDashboardModel() : '') || model;
           var currentProvider = (window.getDashboardProvider ? window.getDashboardProvider() : '') || '';
@@ -612,8 +726,8 @@
           }
 
           var imgB64 = pendingImage;
-          pendingImage = null;
-          if (previewBox) previewBox.style.display = 'none';
+          var attObj = pendingAttachment;
+          clearAttachment();
           input.value = '';
           input.style.height = 'auto';
           if (charCount) charCount.textContent = '0';
@@ -621,12 +735,14 @@
 
           if (!conversation.messages) conversation.messages = [];
           if (window.saveConversationMessage) {
-            window.saveConversationMessage(conversation.id, 'user', text, { image: imgB64 });
+            window.saveConversationMessage(conversation.id, 'user', text, { image: imgB64, attachment: attObj });
           } else {
-            conversation.messages.push({ role: 'user', content: text, image: imgB64, timestamp: Date.now() });
+            conversation.messages.push({ role: 'user', content: text, image: imgB64, attachment: attObj, timestamp: Date.now() });
           }
 
-          appendUserBubble(msgList, text, imgB64);
+          if (msgList) msgList._userScrolledUp = false;
+          if (S) S._userScrolledUp = false;
+          appendUserBubble(msgList, text, imgB64, attObj);
           scrollBottom(msgList);
 
           clearStreamTurn();
@@ -643,6 +759,8 @@
             if (m.tool_call_id) h.tool_call_id = m.tool_call_id;
             if (m.images) h.images = m.images;
             if (m.image && !h.images) h.images = [m.image];
+            if (m.attachments) h.attachments = m.attachments;
+            if (m.attachment && !h.attachments) h.attachments = [m.attachment];
             return h;
           });
 
@@ -684,6 +802,7 @@
               conversationId: conversation.id,
               message: text,
               image: imgB64,
+              attachment: attObj,
               model: currentModel,
               provider: currentProvider,
               history: history,
@@ -1586,6 +1705,9 @@
           S.thinkBlock.open = false;
         }
         S.thinkBlock = null; S.thinkPre = null; S.thinkText = ''; S.iterationThinking = '';
+        if (S.msgList && !S.msgList._userScrolledUp) {
+          scrollBottomSmooth(S.msgList);
+        }
       }
 
       // ═══════════════════════════════════════════════════
@@ -1604,11 +1726,12 @@
               '<div class="cr-todos-panel" style="display:none"></div>' +
               '<div class="cr-agent-controls-panel" style="display:none"></div>' +
               '<div class="cr-img-preview" style="display:none">' +
-                '<img class="cr-preview-img" src="" alt=""/>' +
+                '<img class="cr-preview-img" src="" alt="" style="display:none"/>' +
+                '<div class="cr-preview-doc" style="display:none">' + I.file + '<span class="cr-preview-doc-name"></span></div>' +
                 '<button type="button" class="cr-clear-img-btn" title="Remove">' + I.close + '</button>' +
               '</div>' +
               '<div class="cr-composer-row">' +
-                '<button type="button" class="cr-attach-btn" title="Attach image">' + I.attach + '</button>' +
+                '<button type="button" class="cr-attach-btn" title="Attach image or PDF document">' + I.attach + '</button>' +
                 '<textarea class="cr-textarea" rows="1" placeholder="Ask anything..."></textarea>' +
                 '<button type="button" class="cr-send-btn" title="Send">' + I.send + '</button>' +
                 '<button type="button" class="cr-stop-btn" title="Stop generation" style="display:none">' + I.stop + '</button>' +
@@ -1618,20 +1741,78 @@
                 '<span class="cr-hint">Shift+Enter · new line</span>' +
               '</div>' +
             '</div>' +
-            '<input type="file" class="cr-file-input" accept="image/*" style="display:none"/>' +
+            '<input type="file" class="cr-file-input" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.gif,.webp" style="display:none"/>' +
           '</div>'
         );
       }
 
-      function appendUserBubble(msgList, text, imgB64) {
+      function resolveMediaSrc(media) {
+        if (!media) return '';
+        var s = String(media).trim();
+        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('vscode-webview-resource:') || s.startsWith('vscode-resource:')) {
+          return s;
+        }
+        return 'data:image/png;base64,' + s;
+      }
+
+      function appendUserBubble(msgList, text, imgInput, attObj) {
         var row = mk('div', 'cr-row cr-row--user');
         var bub = mk('div', 'cr-user-bubble');
-        if (imgB64) {
-          var img = mk('img', 'cr-attach-thumb');
-          img.src = String(imgB64).startsWith('data:') ? imgB64 : 'data:image/png;base64,' + imgB64;
-          img.alt = 'attachment';
-          bub.appendChild(img);
+
+        var imgList = [];
+        if (Array.isArray(imgInput)) {
+          imgList = imgInput;
+        } else if (imgInput) {
+          imgList = [imgInput];
         }
+
+        imgList.forEach(function(imgItem) {
+          if (!imgItem) return;
+          var img = mk('img', 'cr-attach-thumb');
+          img.src = resolveMediaSrc(imgItem);
+          img.alt = 'attachment';
+          img.title = 'Click to open image';
+          img.style.cursor = 'pointer';
+          img.onclick = function() {
+            try {
+              if (window.VSCODE_API) {
+                window.VSCODE_API.postMessage({ type: 'openExternal', url: img.src });
+              } else {
+                window.open(img.src, '_blank');
+              }
+            } catch (_) {
+              window.open(img.src, '_blank');
+            }
+          };
+          img.onload = function() {
+            if (msgList && !msgList._userScrolledUp) {
+              scrollBottom(msgList);
+            }
+          };
+          bub.appendChild(img);
+        });
+
+        if (attObj && (attObj.isPdf || attObj.name)) {
+          var docBadge = mk('div', 'cr-attach-doc-badge');
+          docBadge.innerHTML = I.file + '<span>' + esc(attObj.name || 'Document.pdf') + '</span>';
+          if (attObj.url) {
+            docBadge.style.cursor = 'pointer';
+            docBadge.title = 'Click to open document';
+            docBadge.onclick = function() {
+              try {
+                if (window.VSCODE_API) {
+                  window.VSCODE_API.postMessage({ type: 'openExternal', url: attObj.url });
+                } else {
+                  window.open(attObj.url, '_blank');
+                }
+              } catch (_) {
+                window.open(attObj.url, '_blank');
+              }
+            };
+          }
+          bub.appendChild(docBadge);
+        }
+
         if (text) {
           var sp = mk('span', 'cr-user-text');
           sp.textContent = text;
@@ -2693,7 +2874,20 @@
         resultContainer.style.display = 'none';
         if (result) {
           var resText = formatToolResultText(toolName, result);
-          if (resText) {
+          var initialImg = (result && (result.image_url || result.imageUrl)) || '';
+          if (!initialImg && resText) {
+            var m = resText.match(/!\[.*?\]\((https?:\/\/[^\s"')]+)\)/);
+            if (m) initialImg = m[1];
+          }
+          if (initialImg) {
+            resultContainer.style.display = 'block';
+            var cleanDesc = resText ? resText.replace(/!\[.*?\]\([^\s"')]+\)/g, '').trim() : '';
+            resultContainer.innerHTML =
+              '<div class="cr-tool-card-image-wrap">' +
+                '<img class="md-img" src="' + esc(initialImg) + '" alt="' + esc(toolName) + '" referrerpolicy="no-referrer" loading="lazy" />' +
+              '</div>' +
+              (cleanDesc ? '<div class="cr-tool-card-caption">' + esc(cleanDesc) + '</div>' : '');
+          } else if (resText) {
             resultContainer.style.display = 'block';
             resultContainer.innerHTML = '<pre class="cr-tool-card-result-pre">' + esc(resText) + '</pre>';
           }
@@ -2764,8 +2958,22 @@
               if (resText) {
                 resultContainer.innerHTML += '<pre class="cr-tool-card-result-pre">' + esc(resText) + '</pre>';
               }
-            } else if (resText) {
-              resultContainer.innerHTML = '<pre class="cr-tool-card-result-pre">' + esc(resText) + '</pre>';
+            } else {
+              var imageUrl = (result && (result.image_url || result.imageUrl)) || '';
+              if (!imageUrl && resText) {
+                var imgMatch = resText.match(/!\[.*?\]\((https?:\/\/[^\s"')]+)\)/);
+                if (imgMatch) imageUrl = imgMatch[1];
+              }
+              if (imageUrl) {
+                var cleanDesc = resText ? resText.replace(/!\[.*?\]\([^\s"')]+\)/g, '').trim() : '';
+                resultContainer.innerHTML =
+                  '<div class="cr-tool-card-image-wrap">' +
+                    '<img class="md-img" src="' + esc(imageUrl) + '" alt="' + esc(toolName) + '" referrerpolicy="no-referrer" loading="lazy" />' +
+                  '</div>' +
+                  (cleanDesc ? '<div class="cr-tool-card-caption">' + esc(cleanDesc) + '</div>' : '');
+              } else if (resText) {
+                resultContainer.innerHTML = '<pre class="cr-tool-card-result-pre">' + esc(resText) + '</pre>';
+              }
             }
 
             // Show diff if applicable

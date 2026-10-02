@@ -14,9 +14,9 @@ export function getConfig() {
   if (_cached) return _cached;
   var cfg = vscode.workspace.getConfiguration('qwen-coderun');
   _cached = {
-    provider: cfg.get('provider', 'ollama'),
-    baseUrl: cfg.get('baseUrl', 'http://localhost:11434'),
-    model: cfg.get('model', ''),
+    provider: cfg.get('provider', 'qwen'),
+    baseUrl: cfg.get('baseUrl', 'https://chat.qwen.ai/api/v2'),
+    model: cfg.get('model', 'qwen3.7-plus'),
     maxIterations: cfg.get('maxIterations', 20),
     streaming: cfg.get('streaming', true),
     showThinking: cfg.get('showThinking', true),

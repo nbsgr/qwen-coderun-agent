@@ -256,3 +256,14 @@ registerTool('create_plan',
   },
   ["steps"]
 );
+
+registerTool('image_gen',
+  "Generate an image using Qwen's native Wanx text-to-image AI model. Use this tool whenever the user asks to generate, create, or draw an image or picture.",
+  {
+    prompt: {
+      type: "string",
+      description: "Detailed description of the image to generate, e.g. 'A sleek modern red race car on a racetrack'."
+    }
+  },
+  ["prompt"]
+);

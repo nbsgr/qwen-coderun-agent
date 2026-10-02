@@ -115,6 +115,8 @@ export async function runAgentLoop(userPrompt, config, options) {
     history: history,
     knowledge: knowledge,
     images: options.images || [],
+    attachments: options.attachments || (options.attachment ? [options.attachment] : []),
+    files: options.files || [],
     shellName: terminalManager.getShellName(),
     platformName: terminalManager.getPlatformName()
   });
@@ -620,6 +622,7 @@ export async function runAgentLoop(userPrompt, config, options) {
       };
     });
     var assistantMsg = { role: 'assistant', content: stripToolCallBlocks(iterationContent || '') };
+    if (iterationThinking) assistantMsg.reasoning = iterationThinking;
     if (assistantToolCalls.length) assistantMsg.tool_calls = assistantToolCalls;
     messages.push(assistantMsg);
 

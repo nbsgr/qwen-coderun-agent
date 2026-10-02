@@ -146,6 +146,7 @@
     "@vscode/vsce": "^3.9.2"
   },
   "dependencies": {
+    "ali-oss": "^6.23.0",
     "sql.js": "^1.14.1"
   }
 }

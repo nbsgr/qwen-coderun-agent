@@ -126,8 +126,14 @@ export function buildMessages(userPrompt, options) {
     };
     if (msg.tool_calls) historyMsg.tool_calls = msg.tool_calls;
     if (msg.tool_call_id) historyMsg.tool_call_id = msg.tool_call_id;
+    if (msg.tool_name) historyMsg.tool_name = msg.tool_name;
+    if (msg.reasoning) historyMsg.reasoning = msg.reasoning;
+    if (msg.thinking) historyMsg.thinking = msg.thinking;
     if (msg.images) historyMsg.images = msg.images;
     if (msg.image && !historyMsg.images) historyMsg.images = [msg.image];
+    if (msg.attachments) historyMsg.attachments = msg.attachments;
+    if (msg.attachment && !historyMsg.attachments) historyMsg.attachments = [msg.attachment];
+    if (msg.files) historyMsg.files = msg.files;
     messages.push(historyMsg);
   }
 
@@ -147,6 +153,14 @@ export function buildMessages(userPrompt, options) {
     var currentImages = options.images || [];
     if (currentImages && currentImages.length) {
       userMsg.images = currentImages;
+    }
+    var currentAttachments = options.attachments || (options.attachment ? [options.attachment] : []);
+    if (currentAttachments && currentAttachments.length) {
+      userMsg.attachments = currentAttachments;
+    }
+    var currentFiles = options.files || [];
+    if (currentFiles && currentFiles.length) {
+      userMsg.files = currentFiles;
     }
     messages.push(userMsg);
   }
